@@ -1,0 +1,6 @@
+[submodule "VIsible_Light_Sensor/lib/ADC"]
+	path = VIsible_Light_Sensor/lib/ADC
+	url = https://github.com/pedvide/ADC.git
+[submodule "VIsible_Light_Sensor/lib/TeensyThreads"]
+	path = VIsible_Light_Sensor/lib/TeensyThreads
+	url = https://github.com/ftrias/TeensyThreads.git
