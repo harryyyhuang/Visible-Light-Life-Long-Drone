@@ -25,8 +25,9 @@ else
 CFLAGS += -DDEBUG_LOGGING=0
 endif
 
-
 C_SOURCES = blimp_physics.c blimpmodel.c blimp2b.c utils.c controller_pid.c
+
+CFLAGS += -D_GNU_SOURCE
 
 ### Do not modify: this includes Webots global Makefile.include
 null :=
