@@ -1,0 +1,363 @@
+#VRML_SIM R2025a utf8
+# license: Copyright Cyberbotics Ltd. Licensed for use only with Webots.
+# license url: https://cyberbotics.com/webots_assets_license
+# documentation url: https://webots.cloud/run?url=https://github.com/cyberbotics/webots/blob/released/projects/robots/epfl/lis/protos/Blimp.proto
+# keywords: robot/flying
+# The "Blimp" robot is a Zeppelin-like aerial robot developed by the EPFL LIS laboratory.
+
+PROTO Blimp [
+  field SFVec3f    translation     0 0 0.4     # Is `Pose.translation`.
+  field SFRotation rotation        0 0 1 0     # Is `Pose.rotation`.
+  field SFString   name            "Blimp"     # Is `Solid.name`.
+  field SFString   controller      "blimp"     # Is `Robot.controller`.
+  field MFString   controllerArgs  []          # Is `Robot.controllerArgs`.
+  field SFString   window          "<generic>" # Is `Robot.window`.
+  field SFString   customData      ""          # Is `Robot.customData`.
+  field SFBool     supervisor      TRUE       # Is `Robot.supervisor`.
+  field SFBool     synchronization TRUE        # Is `Robot.synchronization`.
+  field MFNode     extensionSlot   []          # Extends the robot with new nodes in the extension slot.
+]
+{
+  Robot {
+    translation IS translation
+    rotation IS rotation
+    children [
+      Group {
+        children IS extensionSlot
+      }
+      DEF emitter Emitter {
+        model "radio"
+        bufferSize 1000
+      }
+      Receiver {
+        bufferSize 1000
+      }
+      DEF DS0 DistanceSensor {
+        translation 0.54 0 0
+        name "ds0"
+        lookupTable [
+          0 255 0
+          0.25 0 0
+        ]
+      }
+      DEF DS6 DistanceSensor {
+        translation 0 0.26 0
+        rotation 0 0 1 1.57
+        name "ds6"
+        lookupTable [
+          0 255 0
+          0.25 0 0
+        ]
+      }
+      DEF FRAME Pose {
+        children [
+          # Main blimp mesh
+          Shape {
+            appearance PBRAppearance {
+              baseColor 0.7 0.7 1.0
+              roughness 0.5
+            }
+            geometry Mesh {
+              url "../asset/simple_MAB.stl"
+            }
+            castShadows FALSE
+          }
+        ]
+      }
+      DEF GYRO Gyro {
+        name "gyro"
+      }
+      DEF IMU InertialUnit {
+        name "imu"
+      }
+      DEF GPS GPS {
+        name "gps"
+      }
+      # Light sensor array - 16 sensors in circular pattern (22.5° separation)
+      # Radius = 0.35m, sensors positioned at Z = -0.35 (gondola level)
+      # Each sensor rotated to point outward from center
+      DEF LightSensor0 LightSensor {
+        translation 0.35 0 -0.35         # 0° position
+        rotation 0 0 1 0                 # 0° rotation - points in +X direction
+        name "light_sensor_0"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor1 LightSensor {
+        translation 0.324 0.135 -0.35    # 22.5° position
+        rotation 0 0 1 0.3927            # 22.5° rotation
+        name "light_sensor_1"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor2 LightSensor {
+        translation 0.247 0.247 -0.35    # 45° position
+        rotation 0 0 1 0.7854            # 45° rotation
+        name "light_sensor_2"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor3 LightSensor {
+        translation 0.135 0.324 -0.35    # 67.5° position
+        rotation 0 0 1 1.1781            # 67.5° rotation
+        name "light_sensor_3"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor4 LightSensor {
+        translation 0 0.35 -0.35         # 90° position
+        rotation 0 0 1 1.5708            # 90° rotation
+        name "light_sensor_4"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor5 LightSensor {
+        translation -0.135 0.324 -0.35   # 112.5° position
+        rotation 0 0 1 1.9635            # 112.5° rotation
+        name "light_sensor_5"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor6 LightSensor {
+        translation -0.247 0.247 -0.35   # 135° position
+        rotation 0 0 1 2.3562            # 135° rotation
+        name "light_sensor_6"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor7 LightSensor {
+        translation -0.324 0.135 -0.35   # 157.5° position
+        rotation 0 0 1 2.7489            # 157.5° rotation
+        name "light_sensor_7"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor8 LightSensor {
+        translation -0.35 0 -0.35        # 180° position
+        rotation 0 0 1 3.1416            # 180° rotation
+        name "light_sensor_8"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor9 LightSensor {
+        translation -0.324 -0.135 -0.35  # 202.5° position
+        rotation 0 0 1 3.5343            # 202.5° rotation
+        name "light_sensor_9"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor10 LightSensor {
+        translation -0.247 -0.247 -0.35  # 225° position
+        rotation 0 0 1 3.9270            # 225° rotation
+        name "light_sensor_10"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor11 LightSensor {
+        translation -0.135 -0.324 -0.35  # 247.5° position
+        rotation 0 0 1 4.3197            # 247.5° rotation
+        name "light_sensor_11"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor12 LightSensor {
+        translation 0 -0.35 -0.35        # 270° position
+        rotation 0 0 1 4.7124            # 270° rotation
+        name "light_sensor_12"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor13 LightSensor {
+        translation 0.135 -0.324 -0.35   # 292.5° position
+        rotation 0 0 1 5.1051            # 292.5° rotation
+        name "light_sensor_13"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor14 LightSensor {
+        translation 0.247 -0.247 -0.35   # 315° position
+        rotation 0 0 1 5.4978            # 315° rotation
+        name "light_sensor_14"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+      DEF LightSensor15 LightSensor {
+        translation 0.324 -0.135 -0.35   # 337.5° position
+        rotation 0 0 1 5.8905            # 337.5° rotation
+        name "light_sensor_15"
+        children [
+          Shape {
+            geometry IndexedLineSet {
+              coord Coordinate {
+                point [0 0 0, 0.1 0 0]  # Line points in sensor's local +X direction
+              }
+              coordIndex [0, 1, -1]
+            }
+          }
+        ]
+      }
+    ]
+    name IS name
+    model "LIS Blimp"
+    
+    boundingObject Group {
+    children [
+      # Balloon collision sphere
+      DEF BalloonSphere Pose {
+        translation 0 0 0.4  # Adjust to match your balloon position
+        children [
+          Sphere {
+            radius 0.45  # Match your balloon radius
+          }
+        ]
+      }
+      # Gondola collision box
+      DEF GondolaBox Pose {
+        translation 0 0 -0.34  # Gondola position
+        children [
+          Box {
+            size 0.35 0.35 0.09  # Gondola dimensions
+          }
+        ]
+      }
+    ]
+  }
+    physics Physics {
+      # density -1
+      mass 0.38427096
+      centerOfMass [
+        0.03034612 -0.00625388 -0.06561044
+      ]
+      inertiaMatrix [
+        0.05039771 0.0500516 0.0207284
+        -6e-8 0.00003505 -8.5e-7
+      ]
+    }
+    controller IS controller
+    controllerArgs IS controllerArgs
+    window IS window
+    customData IS customData
+    supervisor IS supervisor
+    synchronization IS synchronization
+  }
+}

@@ -1,0 +1,63 @@
+# Webots Physics Plugin Build Artifacts
+*.o
+*.exe
+*.dll
+*.so
+*.dylib
+*.obj
+*.lib
+*.a
+
+# Build directories
+build/
+Build/
+
+# Ignore log files but keep the logs directory
+logs/*.txt
+logs/*.csv
+logs/*.log
+logs/*.dat
+
+# Keep the README.md in logs directory
+!logs/
+!logs/README.md
+
+# Ignore analysis output plots but keep analysis scripts
+analysis/plots/
+analysis/__pycache__/
+analysis/*.pyc
+
+# Keep analysis scripts and documentation
+!analysis/
+!analysis/README.md
+!analysis/requirements.txt
+!analysis/*.py
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# IDE and editor files
+.vscode/
+.vs/
+*.vcxproj.user
+*.sln.docstates
+*.suo
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+*~.nib

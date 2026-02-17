@@ -1,0 +1,62 @@
+# Webots Controller Build Artifacts
+*.exe
+*.o
+*.obj
+*.lib
+*.a
+*.dll
+*.so
+*.dylib
+
+# Build directories
+build/
+Build/
+
+# Log files and debug output
+logs/*.txt
+logs/*.csv
+logs/*.log
+logs/*.dat
+
+# Keep the logs directory structure and documentation
+!logs/
+!logs/README.md
+
+# Ignore analysis output plots but keep analysis scripts
+analysis/plots/*
+analysis/__pycache__/
+analysis/*.pyc
+
+# Keep analysis scripts and documentation
+!analysis/
+!analysis/requirements.txt
+!analysis/*.py
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# IDE and editor files
+.vscode/
+.vs/
+*.vcxproj.user
+*.sln.docstates
+*.suo
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+*~.nib
