@@ -1,0 +1,219 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "../protos/Blimp.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/lights/protos/FloorLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Parquetry.proto"
+
+WorldInfo {
+  info [
+    "A blimp robot model demonstrating custom physics."
+    "If you wish you can control the robot with the keyboard:"
+    "The control keys are: up, down, right, left, page up, page down and space (reset)."
+    "Authors: Jean-Christophe Zufferey, Alexis Guanella, Antoine Beyeler"
+    "Laboratory of Intelligent Systems (LIS)"
+    "Swiss Federal Institute of Technology (EPFL), Lausanne"
+    "Obstacle course added for combined bearing/gradient controller testing."
+    "Obstacles are placed along the direct bearing path (~37 deg diagonal)"
+    "from the blimp start (-3.6, -1.3) to the light target (5.2, 5.3)."
+  ]
+  title "LIS-EPFL Blimp - Obstacle Course"
+  physics "blimp_physics"
+  contactProperties [
+    ContactProperties {
+      material1 "blimp"
+      coulombFriction [
+        0.6
+      ]
+      bounce 0.4
+      bounceVelocity 0
+    }
+  ]
+}
+Viewpoint {
+  orientation 0.12886696059458586 0.060173610492208145 -0.9898345533812433 1.921830125849391
+  position -0.7158540273007847 5.211143316155065 2.1781063902672084
+  bloomThreshold 100
+}
+TexturedBackground {
+}
+DEF blimp_lis Blimp {
+  translation -3.6117324178199413 -1.3011433366849614 0.409996597976880164
+}
+
+# ===========================================================================
+# Light target (unchanged from original world)
+# ===========================================================================
+FloorLight {
+  translation 5.1988 5.329 0.0001
+  pointLightIntensity 5
+  pointLightCastShadows TRUE
+}
+
+# ===========================================================================
+# OBSTACLE 1 -- Cylindrical pillar A  (25% along path, offset left of corridor)
+# Position: (-1.4, 0.36) shifted ~0.8 m to the left of the direct path.
+# Paired with Pillar B on the right to create a narrow gap the blimp must
+# navigate through.
+# ===========================================================================
+DEF PILLAR_A Solid {
+  translation -1.9 0.9 1.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.5 0.2 0.1
+        roughness 0.8
+        metalness 0
+      }
+      geometry Cylinder {
+        height 3.0
+        radius 0.25
+      }
+    }
+  ]
+  name "pillar_a"
+  boundingObject Cylinder {
+    height 3.0
+    radius 0.25
+  }
+  physics Physics {
+    density -1
+    mass 1000
+  }
+}
+
+# ===========================================================================
+# OBSTACLE 2 -- Cylindrical pillar B  (25% along path, offset right of corridor)
+# Paired with Pillar A to form a narrow gate.
+# Gap between inner edges: ~1.0 m (blimp diameter ~0.5 m -- tight but passable)
+# ===========================================================================
+DEF PILLAR_B Solid {
+  translation -0.9 -0.2 1.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.5 0.2 0.1
+        roughness 0.8
+        metalness 0
+      }
+      geometry Cylinder {
+        height 3.0
+        radius 0.25
+      }
+    }
+  ]
+  name "pillar_b"
+  boundingObject Cylinder {
+    height 3.0
+    radius 0.25
+  }
+  physics Physics {
+    density -1
+    mass 1000
+  }
+}
+
+# ===========================================================================
+# OBSTACLE 3 -- Box wall (45% along path)
+# Rotated ~37 deg to sit across the travel corridor.
+# The wall has a gap on its right side (left when facing target) so the blimp
+# must deviate from the straight-line bearing to get around it.
+# Wall centre: (0.36, 1.68). Length 2.5 m, thickness 0.2 m, height 3 m.
+# Rotation axis Z, angle = 0.6457 rad (37 deg) to align perpendicular to path.
+# ===========================================================================
+DEF WALL_A Solid {
+  translation 0.36 1.68 1.5
+  rotation 0 0 1 0.6457
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.6 0.6 0.6
+        roughness 0.9
+        metalness 0
+      }
+      geometry Box {
+        size 2.5 0.2 3.0
+      }
+    }
+  ]
+  name "wall_a"
+  boundingObject Box {
+    size 2.5 0.2 3.0
+  }
+  physics Physics {
+    density -1
+    mass 1000
+  }
+}
+
+# ===========================================================================
+# OBSTACLE 4 -- Cylindrical pillar C  (60% along path, offset right)
+# Placed past the wall to keep the light field distorted further along the
+# path, ensuring the gradient fallback is exercised beyond the wall.
+# ===========================================================================
+DEF PILLAR_C Solid {
+  translation 2.3 2.1 1.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.5 0.2 0.1
+        roughness 0.8
+        metalness 0
+      }
+      geometry Cylinder {
+        height 3.0
+        radius 0.25
+      }
+    }
+  ]
+  name "pillar_c"
+  boundingObject Cylinder {
+    height 3.0
+    radius 0.25
+  }
+  physics Physics {
+    density -1
+    mass 1000
+  }
+}
+
+# ===========================================================================
+# OBSTACLE 5 -- Cylindrical pillar D  (75% along path, offset left)
+# Paired loosely with Pillar C to narrow the corridor again after the wall.
+# ===========================================================================
+DEF PILLAR_D Solid {
+  translation 3.6 4.2 1.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.5 0.2 0.1
+        roughness 0.8
+        metalness 0
+      }
+      geometry Cylinder {
+        height 3.0
+        radius 0.25
+      }
+    }
+  ]
+  name "pillar_d"
+  boundingObject Cylinder {
+    height 3.0
+    radius 0.25
+  }
+  physics Physics {
+    density -1
+    mass 1000
+  }
+}
+
+# ===========================================================================
+# Floor (unchanged from original world)
+# ===========================================================================
+Floor {
+  size 50 50
+  tileSize 0.8 0.8
+  appearance Parquetry {
+  }
+}

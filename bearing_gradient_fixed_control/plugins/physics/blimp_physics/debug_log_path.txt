@@ -1,0 +1,4 @@
+Platform: Windows
+DLL/SO path: C:\Users\harryhuang\OneDrive - Delft University of Technology\Documents\GT-MAB-simulator-webot\bearing_angle_control\plugins\physics\blimp_physics
+Log path template: [dll_dir]/logs/[filename]
+Example log path: C:\Users\harryhuang\OneDrive - Delft University of Technology\Documents\GT-MAB-simulator-webot\bearing_angle_control\plugins\physics\blimp_physics\logs\blimp_physics_debug.csv
