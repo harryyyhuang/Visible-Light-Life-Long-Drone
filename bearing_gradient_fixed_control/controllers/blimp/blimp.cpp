@@ -68,8 +68,8 @@ static const double MIN_TOTAL_LIGHT       = 1.0;   // aggregate threshold
 // ---------------------------------------------------------------------------
 // Fusion weights (fixed)
 // ---------------------------------------------------------------------------
-static const double W_BEARING  = 0.7;
-static const double W_GRADIENT = 0.3;  // only active once gradient is ready
+static const double W_BEARING  = 0.5;
+static const double W_GRADIENT = 0.5;  // only active once gradient is ready
 
 // ---------------------------------------------------------------------------
 // Gradient readiness thresholds
@@ -207,7 +207,11 @@ static bool estimate_gradient(double cx, double cy,
         ss_tot += (p.light_intensity - mean_z) * (p.light_intensity - mean_z);
     }
     double r2 = (ss_tot > 1e-10) ? (1.0 - ss_res / ss_tot) : 0.0;
-    if (r2 < 0.2) return false;
+    // Only trust the gradient if fit quality is reasonable
+    if (r2 < 0.8) {  // Lower threshold for map-based approach
+        printf("Poor plane fit quality (R²=%.3f), rejecting gradient\n", r2);
+        return false;
+    }
 
     return true;
 }
@@ -367,9 +371,25 @@ int main() {
         // Convert relative bearing to absolute world heading
         double abs_bearing_yaw = normalize_angle(current_yaw + smooth_bearing);
 
-        // --- Passive map update ---
-        if (search_active)
-            update_map(pos[0], pos[1], total_light, t, rpy[2]);
+        // --- Passive map update with lateral exploration offset ---
+        // Add small sinusoidal lateral deviation to build 2D spatial coverage
+        // even when flying mostly straight. This ensures the gradient has
+        // enough spread in perpendicular directions to fit a meaningful plane.
+        if (search_active) {
+            const double EXPLORE_AMPLITUDE = 0.3;  // ±0.3m lateral oscillation
+            const double EXPLORE_FREQUENCY = 0.5;  // rad/s
+            double lateral_offset = EXPLORE_AMPLITUDE * sin(t * EXPLORE_FREQUENCY);
+            
+            // Perpendicular direction to current yaw (right-hand side)
+            double perp_x = -sin(current_yaw * M_PI / 180.0);
+            double perp_y =  cos(current_yaw * M_PI / 180.0);
+            
+            // Offset position for map storage (actual blimp position unchanged)
+            double map_x = pos[0] + lateral_offset * perp_x;
+            double map_y = pos[1] + lateral_offset * perp_y;
+            
+            update_map(map_x, map_y, total_light, t, rpy[2]);
+        }
 
         // --- Gradient estimation ---
         double gx = 0, gy = 0, grad_mag = 0;
