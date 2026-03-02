@@ -82,6 +82,8 @@ static const double GRADIENT_THRESHOLD    = 0.5;   // minimum gradient magnitude
 // ---------------------------------------------------------------------------
 static const double GRID_RESOLUTION       = 0.2;   // m per cell
 static const double MIN_LIGHT_IMPROVEMENT = 0.1;   // hysteresis for map updates
+static const double EXPLORE_AMPLITUDE     = 0.0;   // ±0.3m lateral oscillation
+static const double EXPLORE_FREQUENCY     = 0.0;   // rad/s
 
 // ---------------------------------------------------------------------------
 // Target
@@ -143,7 +145,7 @@ static void update_map(double x, double y, double intensity,
 
 // ---------------------------------------------------------------------------
 // Least-squares plane fit over nearby map points → gradient (∂z/∂x, ∂z/∂y)
-// Returns false if insufficient data or poor fit quality (R² < 0.2)
+// Returns false if insufficient data or poor fit quality (R² < GRADIENT_THRESHOLD)
 // ---------------------------------------------------------------------------
 static bool estimate_gradient(double cx, double cy,
                                double& gx_out, double& gy_out,
@@ -208,7 +210,7 @@ static bool estimate_gradient(double cx, double cy,
     }
     double r2 = (ss_tot > 1e-10) ? (1.0 - ss_res / ss_tot) : 0.0;
     // Only trust the gradient if fit quality is reasonable
-    if (r2 < 0.8) {  // Lower threshold for map-based approach
+    if (r2 < GRADIENT_THRESHOLD) {  // Lower threshold for map-based approach
         printf("Poor plane fit quality (R²=%.3f), rejecting gradient\n", r2);
         return false;
     }
@@ -248,6 +250,61 @@ static double weighted_circular_mean(double angle1_deg, double w1,
     double cx = w1 * cos(r1) + w2 * cos(r2);
     double cy = w1 * sin(r1) + w2 * sin(r2);
     return atan2(cy, cx) * 180.0 / M_PI;
+}
+
+// ---------------------------------------------------------------------------
+// Map data export for visualization
+// ---------------------------------------------------------------------------
+static void write_map_data(const char* filename) {
+    FILE *fp = fopen(filename, "w");
+    if (!fp) {
+        printf("Failed to create map data file: %s\n", filename);
+        return;
+    }
+    
+    fprintf(fp, "grid_x,grid_y,x,y,light_intensity,timestamp,yaw\n");
+    
+    for (const auto& entry : measurement_map) {
+        const GridCell& cell = entry.first;
+        const MeasurementPoint& pt = entry.second;
+        fprintf(fp, "%d,%d,%.6f,%.6f,%.3f,%.3f,%.6f\n",
+                cell.gx, cell.gy,
+                pt.x, pt.y, pt.light_intensity,
+                pt.timestamp, pt.yaw);
+    }
+    
+    fclose(fp);
+    printf("Map data saved to '%s' with %zu locations\n", filename, measurement_map.size());
+}
+
+static void write_gradient_field(const char* filename,
+                                  double min_x, double max_x,
+                                  double min_y, double max_y,
+                                  double resolution = 0.5) {
+    FILE *fp = fopen(filename, "w");
+    if (!fp) {
+        printf("Failed to create gradient field file: %s\n", filename);
+        return;
+    }
+    
+    fprintf(fp, "x,y,grad_x,grad_y,magnitude,valid\n");
+    
+    int valid_count = 0, total_count = 0;
+    
+    for (double y = min_y; y <= max_y; y += resolution) {
+        for (double x = min_x; x <= max_x; x += resolution) {
+            double gx, gy, mag;
+            bool valid = estimate_gradient(x, y, gx, gy, mag);
+            fprintf(fp, "%.3f,%.3f,%.6f,%.6f,%.6f,%d\n",
+                    x, y, gx, gy, mag, valid ? 1 : 0);
+            if (valid) valid_count++;
+            total_count++;
+        }
+    }
+    
+    fclose(fp);
+    printf("Gradient field saved to '%s' (%d/%d valid points)\n",
+           filename, valid_count, total_count);
 }
 
 // ---------------------------------------------------------------------------
@@ -376,8 +433,6 @@ int main() {
         // even when flying mostly straight. This ensures the gradient has
         // enough spread in perpendicular directions to fit a meaningful plane.
         if (search_active) {
-            const double EXPLORE_AMPLITUDE = 0.3;  // ±0.3m lateral oscillation
-            const double EXPLORE_FREQUENCY = 0.5;  // rad/s
             double lateral_offset = EXPLORE_AMPLITUDE * sin(t * EXPLORE_FREQUENCY);
             
             // Perpendicular direction to current yaw (right-hand side)
@@ -502,7 +557,38 @@ int main() {
         }
     }
 
+    // --- Cleanup and map export ---
     if (log_fp) fclose(log_fp);
+    
+    // Write map data and gradient field for visualization
+    if (measurement_map.size() > 0) {
+        write_map_data("logs/fixed_measurement_map.csv");
+        write_map_data("fixed_measurement_map.csv");  // Fallback
+        
+        // Calculate bounds covering trajectory, target, and all map points
+        const double *final_pos = wb_gps_get_values(gps);
+        double min_x = final_pos[0] - 5.0, max_x = final_pos[0] + 5.0;
+        double min_y = final_pos[1] - 5.0, max_y = final_pos[1] + 5.0;
+        
+        min_x = std::min(min_x, TARGET_X - 2.0);
+        max_x = std::max(max_x, TARGET_X + 2.0);
+        min_y = std::min(min_y, TARGET_Y - 2.0);
+        max_y = std::max(max_y, TARGET_Y + 2.0);
+        
+        for (const auto& entry : measurement_map) {
+            const MeasurementPoint& pt = entry.second;
+            min_x = std::min(min_x, pt.x - 1.0);
+            max_x = std::max(max_x, pt.x + 1.0);
+            min_y = std::min(min_y, pt.y - 1.0);
+            max_y = std::max(max_y, pt.y + 1.0);
+        }
+        
+        write_gradient_field("logs/fixed_gradient_field.csv", min_x, max_x, min_y, max_y);
+        write_gradient_field("fixed_gradient_field.csv", min_x, max_x, min_y, max_y);  // Fallback
+    }
+    
+    printf("\nFixed-weight fusion completed. Final map size: %zu locations\n", measurement_map.size());
+
     wb_robot_cleanup();
     return 0;
 }
