@@ -2,7 +2,6 @@
 
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "../protos/Blimp.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/lights/protos/FloorLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/Floor.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Parquetry.proto"
 
@@ -43,13 +42,50 @@ DEF blimp_lis Blimp {
 }
 
 # ===========================================================================
-# Light target (unchanged from original world)
+# Light target as conical spotlight aimed toward drone start position.
+# Direction points from light (5.1988, 5.329, 1.0) to start
+# (-3.6117, -1.3011, 0.41). Cone is narrow, slightly wider than a 0.4 m pillar
+# at this range.
 # ===========================================================================
-FloorLight {
-  translation 5.1988 5.329 0.0001
-  pointLightIntensity 5
-  pointLightCastShadows TRUE
+SpotLight {
+location 5.1988 5.329 1.0
+  location 5.1988 5.329 1.0
+  direction -0.797889 -0.600431 -0.053431
+  intensity 12
+  attenuation 0.22 0 0.10
+  beamWidth 0.90
+  cutOffAngle 1.05   # 120 deg full beam -> ~60 deg half-angle
+  castShadows TRUE
+  on TRUE
 }
+
+
+DEF PILLAR_CENTER Solid {
+  translation 0.8 2.0 1.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.5 0.2 0.1
+        roughness 0.8
+        metalness 0
+      }
+      geometry Cylinder {
+        radius 0.4
+        height 3.0
+      }
+    }
+  ]
+  name "pillar_center"
+  boundingObject Cylinder {
+    radius 0.4
+    height 3.0
+  }
+  physics Physics {
+    density -1
+    mass 1000
+  }
+}
+
 
 # ===========================================================================
 # OBSTACLE 1 -- Cylindrical pillar A  (25% along path, offset left of corridor)
@@ -57,62 +93,62 @@ FloorLight {
 # Paired with Pillar B on the right to create a narrow gap the blimp must
 # navigate through.
 # ===========================================================================
-DEF PILLAR_A Solid {
-  translation -1.9 0.9 1.5
-  children [
-    Shape {
-      appearance PBRAppearance {
-        baseColor 0.5 0.2 0.1
-        roughness 0.8
-        metalness 0
-      }
-      geometry Cylinder {
-        height 3.0
-        radius 0.25
-      }
-    }
-  ]
-  name "pillar_a"
-  boundingObject Cylinder {
-    height 3.0
-    radius 0.25
-  }
-  physics Physics {
-    density -1
-    mass 1000
-  }
-}
+# DEF PILLAR_A Solid {
+#  translation -1.9 0.9 1.5
+#  children [
+#    Shape {
+#      appearance PBRAppearance {
+#        baseColor 0.5 0.2 0.1
+#        roughness 0.8
+#        metalness 0
+#      }
+#      geometry Cylinder {
+#        height 3.0
+#        radius 0.25
+#      }
+#    }
+#  ]
+#  name "pillar_a"
+#  boundingObject Cylinder {
+#    height 3.0
+#    radius 0.25
+#  }
+#  physics Physics {
+#    density -1
+#    mass 1000
+#  }
+#}
 
 # ===========================================================================
 # OBSTACLE 2 -- Cylindrical pillar B  (25% along path, offset right of corridor)
 # Paired with Pillar A to form a narrow gate.
 # Gap between inner edges: ~1.0 m (blimp diameter ~0.5 m -- tight but passable)
 # ===========================================================================
-DEF PILLAR_B Solid {
-  translation -0.9 -0.2 1.5
-  children [
-    Shape {
-      appearance PBRAppearance {
-        baseColor 0.5 0.2 0.1
-        roughness 0.8
-        metalness 0
-      }
-      geometry Cylinder {
-        height 3.0
-        radius 0.25
-      }
-    }
-  ]
-  name "pillar_b"
-  boundingObject Cylinder {
-    height 3.0
-    radius 0.25
-  }
-  physics Physics {
-    density -1
-    mass 1000
-  }
-}
+#DEF PILLAR_B Solid {
+#  translation -0.9 -0.2 1.5
+#  children [
+#    Shape {
+#      appearance PBRAppearance {
+#        baseColor 0.5 0.2 0.1
+#        roughness 0.8
+#        metalness 0
+#      }
+#      geometry Cylinder {
+#        height 3.0
+#        radius 0.25
+#      }
+#    }
+#  ]
+#  name "pillar_b"
+#  boundingObject Cylinder {
+#    height 3.0
+#    radius 0.25
+#  }
+#  physics Physics {
+#    density -1
+#    mass 1000
+#  }
+#}
 
 # ===========================================================================
 # OBSTACLE 3 -- Box wall (45% along path)
@@ -122,91 +158,91 @@ DEF PILLAR_B Solid {
 # Wall centre: (0.36, 1.68). Length 2.5 m, thickness 0.2 m, height 3 m.
 # Rotation axis Z, angle = 0.6457 rad (37 deg) to align perpendicular to path.
 # ===========================================================================
-DEF WALL_A Solid {
-  translation 0.36 1.68 1.5
-  rotation 0 0 1 0.6457
-  children [
-    Shape {
-      appearance PBRAppearance {
-        baseColor 0.6 0.6 0.6
-        roughness 0.9
-        metalness 0
-      }
-      geometry Box {
-        size 2.5 0.2 3.0
-      }
-    }
-  ]
-  name "wall_a"
-  boundingObject Box {
-    size 2.5 0.2 3.0
-  }
-  physics Physics {
-    density -1
-    mass 1000
-  }
-}
+#DEF WALL_A Solid {
+#  translation 0.36 1.68 1.5
+#  rotation 0 0 1 0.6457
+#  children [
+#    Shape {
+#      appearance PBRAppearance {
+#        baseColor 0.6 0.6 0.6
+#        roughness 0.9
+#        metalness 0
+#      }
+#      geometry Box {
+#        size 2.5 0.2 3.0
+#      }
+#    }
+#  ]
+#  name "wall_a"
+#  boundingObject Box {
+#    size 2.5 0.2 3.0
+#  }
+#  physics Physics {
+#    density -1
+#    mass 1000
+#  }
+#}
 
 # ===========================================================================
 # OBSTACLE 4 -- Cylindrical pillar C  (60% along path, offset right)
 # Placed past the wall to keep the light field distorted further along the
 # path, ensuring the gradient fallback is exercised beyond the wall.
 # ===========================================================================
-DEF PILLAR_C Solid {
-  translation 2.3 2.1 1.5
-  children [
-    Shape {
-      appearance PBRAppearance {
-        baseColor 0.5 0.2 0.1
-        roughness 0.8
-        metalness 0
-      }
-      geometry Cylinder {
-        height 3.0
-        radius 0.25
-      }
-    }
-  ]
-  name "pillar_c"
-  boundingObject Cylinder {
-    height 3.0
-    radius 0.25
-  }
-  physics Physics {
-    density -1
-    mass 1000
-  }
-}
+#DEF PILLAR_C Solid {
+#  translation 2.3 2.1 1.5
+#  children [
+#    Shape {
+#      appearance PBRAppearance {
+#        baseColor 0.5 0.2 0.1
+#        roughness 0.8
+#        metalness 0
+#      }
+#      geometry Cylinder {
+#        height 3.0
+#        radius 0.25
+#      }
+#    }
+#  ]
+#  name "pillar_c"
+#  boundingObject Cylinder {
+#    height 3.0
+#    radius 0.25
+#  }
+#  physics Physics {
+#    density -1
+#    mass 1000
+#  }
+#}
 
 # ===========================================================================
 # OBSTACLE 5 -- Cylindrical pillar D  (75% along path, offset left)
 # Paired loosely with Pillar C to narrow the corridor again after the wall.
 # ===========================================================================
-DEF PILLAR_D Solid {
-  translation 3.6 4.2 1.5
-  children [
-    Shape {
-      appearance PBRAppearance {
-        baseColor 0.5 0.2 0.1
-        roughness 0.8
-        metalness 0
-      }
-      geometry Cylinder {
-        height 3.0
-        radius 0.25
-      }
-    }
-  ]
-  name "pillar_d"
-  boundingObject Cylinder {
-    height 3.0
-    radius 0.25
-  }
-  physics Physics {
-    density -1
-    mass 1000
-  }
-}
+#DEF PILLAR_D Solid {
+#  translation 3.6 4.2 1.5
+#  children [
+#    Shape {
+#      appearance PBRAppearance {
+#        baseColor 0.5 0.2 0.1
+#        roughness 0.8
+#        metalness 0
+#      }
+#      geometry Cylinder {
+#        height 3.0
+#        radius 0.25
+#      }
+#    }
+#  ]
+#  name "pillar_d"
+#  boundingObject Cylinder {
+#    height 3.0
+#    radius 0.25
+#  }
+#  physics Physics {
+#    density -1
+#    mass 1000
+#  }
+#}
 
 # ===========================================================================
 # Floor (unchanged from original world)

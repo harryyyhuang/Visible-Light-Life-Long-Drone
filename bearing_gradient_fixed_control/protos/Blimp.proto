@@ -80,6 +80,7 @@ PROTO Blimp [
         translation 0.35 0 -0.35         # 0° position
         rotation 0 0 1 0                 # 0° rotation - points in +X direction
         name "light_sensor_0"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -95,6 +96,7 @@ PROTO Blimp [
         translation 0.324 0.135 -0.35    # 22.5° position
         rotation 0 0 1 0.3927            # 22.5° rotation
         name "light_sensor_1"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -110,6 +112,7 @@ PROTO Blimp [
         translation 0.247 0.247 -0.35    # 45° position
         rotation 0 0 1 0.7854            # 45° rotation
         name "light_sensor_2"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -125,6 +128,7 @@ PROTO Blimp [
         translation 0.135 0.324 -0.35    # 67.5° position
         rotation 0 0 1 1.1781            # 67.5° rotation
         name "light_sensor_3"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -140,6 +144,7 @@ PROTO Blimp [
         translation 0 0.35 -0.35         # 90° position
         rotation 0 0 1 1.5708            # 90° rotation
         name "light_sensor_4"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -155,6 +160,7 @@ PROTO Blimp [
         translation -0.135 0.324 -0.35   # 112.5° position
         rotation 0 0 1 1.9635            # 112.5° rotation
         name "light_sensor_5"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -170,6 +176,7 @@ PROTO Blimp [
         translation -0.247 0.247 -0.35   # 135° position
         rotation 0 0 1 2.3562            # 135° rotation
         name "light_sensor_6"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -185,6 +192,7 @@ PROTO Blimp [
         translation -0.324 0.135 -0.35   # 157.5° position
         rotation 0 0 1 2.7489            # 157.5° rotation
         name "light_sensor_7"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -200,6 +208,7 @@ PROTO Blimp [
         translation -0.35 0 -0.35        # 180° position
         rotation 0 0 1 3.1416            # 180° rotation
         name "light_sensor_8"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -215,6 +224,7 @@ PROTO Blimp [
         translation -0.324 -0.135 -0.35  # 202.5° position
         rotation 0 0 1 3.5343            # 202.5° rotation
         name "light_sensor_9"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -230,6 +240,7 @@ PROTO Blimp [
         translation -0.247 -0.247 -0.35  # 225° position
         rotation 0 0 1 3.9270            # 225° rotation
         name "light_sensor_10"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -245,6 +256,7 @@ PROTO Blimp [
         translation -0.135 -0.324 -0.35  # 247.5° position
         rotation 0 0 1 4.3197            # 247.5° rotation
         name "light_sensor_11"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -260,6 +272,7 @@ PROTO Blimp [
         translation 0 -0.35 -0.35        # 270° position
         rotation 0 0 1 4.7124            # 270° rotation
         name "light_sensor_12"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -275,6 +288,7 @@ PROTO Blimp [
         translation 0.135 -0.324 -0.35   # 292.5° position
         rotation 0 0 1 5.1051            # 292.5° rotation
         name "light_sensor_13"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -290,6 +304,7 @@ PROTO Blimp [
         translation 0.247 -0.247 -0.35   # 315° position
         rotation 0 0 1 5.4978            # 315° rotation
         name "light_sensor_14"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
@@ -305,6 +320,7 @@ PROTO Blimp [
         translation 0.324 -0.135 -0.35   # 337.5° position
         rotation 0 0 1 5.8905            # 337.5° rotation
         name "light_sensor_15"
+        occlusion TRUE
         children [
           Shape {
             geometry IndexedLineSet {
