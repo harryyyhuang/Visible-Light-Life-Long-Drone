@@ -400,7 +400,7 @@ Performance Insights:
         
         print(report)
         
-        with open('mission_report.txt', 'w', encoding='utf-8') as f:
+        with open('plots/mission_report.txt', 'w', encoding='utf-8') as f:
             f.write(report)
         print("[SUCCESS] Saved report to 'mission_report.txt'")
         

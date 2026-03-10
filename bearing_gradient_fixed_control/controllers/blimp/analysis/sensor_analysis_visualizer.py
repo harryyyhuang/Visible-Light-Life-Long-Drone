@@ -268,7 +268,7 @@ class SensorAnalysisVisualizer:
             ax.view_init(elev=25, azim=45)
         
         plt.tight_layout()
-        plt.savefig('sensor_statistics_3d.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plots/sensor_statistics_3d.png', dpi=300, bbox_inches='tight')
         print("[SUCCESS] Saved 3D surface plots to 'sensor_statistics_3d.png'")
         
     def create_2d_heatmaps(self):
@@ -358,7 +358,7 @@ class SensorAnalysisVisualizer:
         axes[4].axis('off')
         
         plt.tight_layout()
-        plt.savefig('sensor_statistics_2d.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plots/sensor_statistics_2d.png', dpi=300, bbox_inches='tight')
         print("[SUCCESS] Saved 2D heatmaps to 'sensor_statistics_2d.png'")
         
     def create_brightest_sensor_map(self):
@@ -389,7 +389,7 @@ class SensorAnalysisVisualizer:
         ax.legend()
         
         plt.tight_layout()
-        plt.savefig('brightest_sensor_map.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plots/brightest_sensor_map.png', dpi=300, bbox_inches='tight')
         print("[SUCCESS] Saved brightest sensor map to 'brightest_sensor_map.png'")
         
     def create_summary_report(self):
@@ -454,7 +454,7 @@ FILES GENERATED:
         
         print(report)
         
-        with open('sensor_analysis_report.txt', 'w') as f:
+        with open('plots/sensor_analysis_report.txt', 'w') as f:
             f.write(report)
         
         print("[SUCCESS] Saved report to 'sensor_analysis_report.txt'")
