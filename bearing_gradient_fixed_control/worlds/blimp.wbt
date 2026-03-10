@@ -53,7 +53,7 @@ SpotLight {
 location 5.1988 5.329 1.0
   location 5.1988 5.329 1.0
   direction -0.797889 -0.600431 -0.053431
-  intensity 12
+  intensity 5
   attenuation 0.22 0 0.10
   beamWidth 0.90
   cutOffAngle 1.05   # 120 deg full beam -> ~60 deg half-angle
