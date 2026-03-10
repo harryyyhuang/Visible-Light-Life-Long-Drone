@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
     
     // Define obstacles (adjust to match your world file)
     // SINGLE OBSTACLE WORLD
-    Obstacle pillar_center = {"PILLAR_CENTER", 0.8, 2.0, 1.5, 0.4, 0, 0, 3.0, true};
+    Obstacle pillar_center = {"PILLAR_CENTER", 0.8, 1.5, 1.5, 0.4, 0, 0, 3.0, true};
     obstacles.push_back(pillar_center);
     
     // MULTI-OBSTACLE WORLD (comment out if using single obstacle)

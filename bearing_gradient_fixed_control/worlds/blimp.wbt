@@ -63,7 +63,7 @@ location 5.1988 5.329 1.0
 
 
 DEF PILLAR_CENTER Solid {
-  translation 0.8 2.0 1.5
+  translation 0.8 1.5 1.5
   children [
     Shape {
       appearance PBRAppearance {

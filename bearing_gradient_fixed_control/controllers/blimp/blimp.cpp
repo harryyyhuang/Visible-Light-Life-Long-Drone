@@ -485,7 +485,7 @@ int main() {
             // No light signal at all -- stop and wait
             cmd_yaw       = current_yaw;
             forward_speed = 0.0;
-            printf("[T:%.1fs] No light signal. Hovering.\n", t);
+            printf("[T:%.1fs] No light signal. Hovering.[bearing valid: %i] [total light: %0.0f]\n", t, bearing_valid, total_light);
 
         } else if (!grad_ready) {
             // Gradient not ready -- pure bearing (100% bearing weight)
