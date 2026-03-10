@@ -529,10 +529,6 @@ class GradientFittingAnalyzer:
                                    edgecolors='none', label='Map Points',
                                    vmin=0, vmax=self.map_df['total_light'].max())
             
-            # Add colorbar for light intensity
-            cbar_light = plt.colorbar(scatter_bg, ax=ax, label='Total Light Intensity', 
-                                     pad=0.12, aspect=30)
-            
             # Plot light source
             ax.scatter([LIGHT_SOURCE_X], [LIGHT_SOURCE_Y], 
                       color='gold', s=500, marker='*', 
@@ -557,9 +553,6 @@ class GradientFittingAnalyzer:
                               width=0.004,
                               clim=[0, 90], zorder=5)
             
-            cbar_err = plt.colorbar(quiver, ax=ax, label='Angle Error (deg)', 
-                                   aspect=30)
-            
             ax.set_xlabel('X Position (m)')
             ax.set_ylabel('Y Position (m)')
             ax.set_title(f'{method.name} - {method.description}\n'
@@ -569,6 +562,20 @@ class GradientFittingAnalyzer:
                         fontweight='bold')
             ax.set_aspect('equal')
             ax.grid(True, alpha=0.3)
+            
+            # Create axes for colorbars
+            # Light intensity colorbar on the RIGHT (normal position)
+            from mpl_toolkits.axes_grid1 import make_axes_locatable
+            divider = make_axes_locatable(ax)
+            cax_light = divider.append_axes("right", size="2%")
+            cbar_light = plt.colorbar(scatter_bg, cax=cax_light, label='Total Light Intensity')
+            
+            # Angle error colorbar on the LEFT
+            cax_error = divider.append_axes("left", size="2%")
+            cbar_error = plt.colorbar(quiver, cax=cax_error, label='Angle Error (deg)')
+            cax_error.yaxis.set_ticks_position('left')
+            cax_error.yaxis.set_label_position('left')
+
         
         plt.tight_layout()
         plt.savefig('plots/gradient_method_comparison.png', dpi=300, bbox_inches='tight')
