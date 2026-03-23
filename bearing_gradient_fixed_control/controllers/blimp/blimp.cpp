@@ -6,6 +6,13 @@
    - Bearing  (16-sensor array)  : 70% weight  -- fast, direct
    - Gradient (spatial map)      : 30% weight  -- spatially aware
 
+ GRADIENT ESTIMATION: Weighted Least Squares (WLS)
+   Each neighbour point is weighted by 1/(d² + epsilon), giving closer
+   measurements more influence on the fitted plane.  This replaces the
+   original unweighted Cramer's-rule fit and improves gradient direction
+   accuracy when map coverage is sparse or unevenly distributed along the
+   flight path.  The R² quality check uses the weighted form for consistency.
+
  The gradient weight is zeroed out until the map has enough points
  (MIN_MAP_POINTS) and the gradient magnitude exceeds GRADIENT_THRESHOLD,
  at which point the fixed 70/30 split kicks in permanently.
@@ -144,8 +151,22 @@ static void update_map(double x, double y, double intensity,
 }
 
 // ---------------------------------------------------------------------------
-// Least-squares plane fit over nearby map points → gradient (∂z/∂x, ∂z/∂y)
-// Returns false if insufficient data or poor fit quality (R² < GRADIENT_THRESHOLD)
+// Weighted least-squares plane fit over nearby map points → gradient (∂z/∂x, ∂z/∂y)
+//
+// Each neighbour point is weighted by  w_i = 1 / (d_i² + epsilon)  where d_i
+// is its distance from the query position (cx, cy).  This gives closer points
+// more influence on the fitted plane, improving accuracy when the measurement
+// distribution is uneven along the flight path.
+//
+// The weighted normal equations are:
+//   (Aᵀ W A) [a, b, c]ᵀ = Aᵀ W z
+// where A = [x  y  1] for each point and W = diag(w_i).
+// Expanded into scalar sums this avoids any matrix library dependency.
+//
+// R² is computed in weighted form so the quality threshold remains meaningful:
+//   R² = 1 - Σ w_i(z_i - ẑ_i)² / Σ w_i(z_i - z̄_w)²
+//
+// Returns false if insufficient data or weighted R² < GRADIENT_THRESHOLD.
 // ---------------------------------------------------------------------------
 static bool estimate_gradient(double cx, double cy,
                                double& gx_out, double& gy_out,
@@ -155,63 +176,83 @@ static bool estimate_gradient(double cx, double cy,
 
     const double MAX_DIST = 3.0;
     const double MIN_DIST = 0.1;
+    const double W_EPS    = 0.01;  // epsilon in weight denominator, avoids 1/0
 
+    // Collect neighbours and compute inverse-distance-squared weights
     std::vector<MeasurementPoint> pts;
+    std::vector<double> weights;
+    double weight_sum = 0.0;
+
     for (const auto& entry : measurement_map) {
         const MeasurementPoint& p = entry.second;
         double dx = cx - p.x, dy = cy - p.y;
         double d  = sqrt(dx*dx + dy*dy);
-        if (d >= MIN_DIST && d <= MAX_DIST) pts.push_back(p);
+        if (d >= MIN_DIST && d <= MAX_DIST) {
+            double w = 1.0 / (d*d + W_EPS);
+            pts.push_back(p);
+            weights.push_back(w);
+            weight_sum += w;
+        }
     }
     if ((int)pts.size() < MIN_MAP_POINTS) return false;
 
-    // Build normal equations:  z = a*x + b*y + c
+    // Normalise weights so they sum to 1
     int n = (int)pts.size();
-    double sx=0, sy=0, sz=0, sxx=0, syy=0, sxy=0, sxz=0, syz=0;
-    for (const auto& p : pts) {
-        sx  += p.x;           sy  += p.y;
-        sz  += p.light_intensity;
-        sxx += p.x * p.x;    syy += p.y * p.y;
-        sxy += p.x * p.y;
-        sxz += p.x * p.light_intensity;
-        syz += p.y * p.light_intensity;
+    for (int i = 0; i < n; i++) weights[i] /= weight_sum;
+
+    // Build weighted normal equations:  (Aᵀ W A) coeff = Aᵀ W z
+    // Expanded scalars (identical layout to the original unweighted version,
+    // but each term is multiplied by the corresponding weight w_i).
+    double sw=0, swx=0, swy=0, swz=0;
+    double swxx=0, swyy=0, swxy=0, swxz=0, swyz=0;
+    for (int i = 0; i < n; i++) {
+        double w = weights[i];
+        double x = pts[i].x, y = pts[i].y, z = pts[i].light_intensity;
+        sw   += w;
+        swx  += w*x;    swy  += w*y;    swz  += w*z;
+        swxx += w*x*x;  swyy += w*y*y;  swxy += w*x*y;
+        swxz += w*x*z;  swyz += w*y*z;
     }
 
-    double A[3][3] = {
-        {sxx, sxy, sx},
-        {sxy, syy, sy},
-        {sx,  sy,  (double)n}
+    // 3×3 weighted normal matrix  M = Aᵀ W A
+    double M[3][3] = {
+        {swxx, swxy, swx},
+        {swxy, swyy, swy},
+        {swx,  swy,  sw }
     };
-    double B[3] = {sxz, syz, sz};
+    double R[3] = {swxz, swyz, swz};  // Aᵀ W z
 
-    double det = A[0][0]*(A[1][1]*A[2][2] - A[1][2]*A[2][1])
-               - A[0][1]*(A[1][0]*A[2][2] - A[1][2]*A[2][0])
-               + A[0][2]*(A[1][0]*A[2][1] - A[1][1]*A[2][0]);
+    // Solve via Cramer's rule (no external library required)
+    double det = M[0][0]*(M[1][1]*M[2][2] - M[1][2]*M[2][1])
+               - M[0][1]*(M[1][0]*M[2][2] - M[1][2]*M[2][0])
+               + M[0][2]*(M[1][0]*M[2][1] - M[1][1]*M[2][0]);
     if (fabs(det) < 1e-6) return false;
 
-    double det_a = B[0]*(A[1][1]*A[2][2] - A[1][2]*A[2][1])
-                 - A[0][1]*(B[1]*A[2][2] - A[1][2]*B[2])
-                 + A[0][2]*(B[1]*A[2][1] - A[1][1]*B[2]);
-    double det_b = A[0][0]*(B[1]*A[2][2] - A[1][2]*B[2])
-                 - B[0]*(A[1][0]*A[2][2] - A[1][2]*A[2][0])
-                 + A[0][2]*(A[1][0]*B[2] - B[1]*A[2][0]);
+    double det_a = R[0]*(M[1][1]*M[2][2] - M[1][2]*M[2][1])
+                 - M[0][1]*(R[1]*M[2][2] - M[1][2]*R[2])
+                 + M[0][2]*(R[1]*M[2][1] - M[1][1]*R[2]);
+    double det_b = M[0][0]*(R[1]*M[2][2] - M[1][2]*R[2])
+                 - R[0]*(M[1][0]*M[2][2] - M[1][2]*M[2][0])
+                 + M[0][2]*(M[1][0]*R[2] - R[1]*M[2][0]);
 
     gx_out    = det_a / det;
     gy_out    = det_b / det;
     magnitude = sqrt(gx_out*gx_out + gy_out*gy_out);
 
-    // R² quality check
-    double mean_z = sz / n, ss_tot = 0, ss_res = 0;
-    double c_coeff = (sz - gx_out*sx - gy_out*sy) / n;
-    for (const auto& p : pts) {
-        double pred = gx_out*p.x + gy_out*p.y + c_coeff;
-        ss_res += (p.light_intensity - pred) * (p.light_intensity - pred);
-        ss_tot += (p.light_intensity - mean_z) * (p.light_intensity - mean_z);
+    // Weighted R² quality check
+    double c_coeff  = (swz - gx_out*swx - gy_out*swy) / sw;
+    double mean_z_w = swz / sw;   // weighted mean of z
+    double ss_res = 0, ss_tot = 0;
+    for (int i = 0; i < n; i++) {
+        double w    = weights[i];
+        double z    = pts[i].light_intensity;
+        double pred = gx_out*pts[i].x + gy_out*pts[i].y + c_coeff;
+        ss_res += w * (z - pred) * (z - pred);
+        ss_tot += w * (z - mean_z_w) * (z - mean_z_w);
     }
     double r2 = (ss_tot > 1e-10) ? (1.0 - ss_res / ss_tot) : 0.0;
-    // Only trust the gradient if fit quality is reasonable
-    if (r2 < GRADIENT_THRESHOLD) {  // Lower threshold for map-based approach
-        printf("Poor plane fit quality (R²=%.3f), rejecting gradient\n", r2);
+    if (r2 < GRADIENT_THRESHOLD) {
+        printf("Poor weighted plane fit (R²=%.3f), rejecting gradient\n", r2);
         return false;
     }
 
