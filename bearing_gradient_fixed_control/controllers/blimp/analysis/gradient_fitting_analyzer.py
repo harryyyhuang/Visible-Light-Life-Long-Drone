@@ -41,7 +41,7 @@ LIGHT_SOURCE_X = 5.1988      # meters
 LIGHT_SOURCE_Y = 5.329       # meters
 
 # Visualization parameters
-SUBSAMPLE_RATE = 5           # Plot every Nth point (to avoid clutter)
+SUBSAMPLE_RATE = 3           # Keep ~1-in-N² points via 2D grid subsampling (scatter in X and Y)
 ARROW_LENGTH = 0.4           # Fixed arrow length in meters (adjust for visibility)
 
 # =============================================================================
@@ -414,16 +414,23 @@ class GradientFittingAnalyzer:
         return neighbors
     
     def calculate_true_gradient(self, x, y):
-        """Calculate ground truth gradient direction to light source."""
-        # Direction vector to light source
+        """Calculate ground truth gradient direction to light source.
+        
+        Returns a unit vector pointing toward the light source and the
+        corresponding angle in degrees.  Points closer than 0.1 m to the
+        source are skipped (returned as None) because the inverse-square
+        field is so steep there that any small numerical error in the
+        estimated gradient direction produces an artificially large angle
+        error even when the direction is essentially correct.
+        """
         dx = LIGHT_SOURCE_X - x
         dy = LIGHT_SOURCE_Y - y
         dist = np.sqrt(dx**2 + dy**2)
         
-        if dist < 0.01:
-            return 0, 0, 0
+        if dist < 0.1:          # Too close -- skip to avoid near-source artefacts
+            return None, None, None
         
-        # Unit vector pointing toward light
+        # Unit vector pointing toward light source
         true_grad_x = dx / dist
         true_grad_y = dy / dist
         true_angle = np.degrees(np.arctan2(dy, dx))
@@ -442,8 +449,26 @@ class GradientFittingAnalyzer:
         print(f"  Min R² threshold: {MIN_R_SQUARED}")
         print(f"  Light source: ({LIGHT_SOURCE_X}, {LIGHT_SOURCE_Y})")
         
-        # Sample test points from the map
-        sample_indices = range(0, len(self.map_df), SUBSAMPLE_RATE)
+        # Sample test points from the map using 2D grid subsampling.
+        # The CSV is written row-by-row in scan order so a plain row-stride
+        # (every Nth row) produces horizontal stripes -- all X positions for
+        # a handful of Y values.  Instead we bin both X and Y into cells and
+        # keep one point per cell so the samples are scattered across the
+        # whole field.
+        x_vals = self.map_df['x'].values
+        y_vals = self.map_df['y'].values
+        x_bins = np.arange(x_vals.min(), x_vals.max() + 1e-9,
+                           (x_vals.max() - x_vals.min()) / max(1, (x_vals.max() - x_vals.min()) / (SUBSAMPLE_RATE * 0.2)))
+        y_bins = np.arange(y_vals.min(), y_vals.max() + 1e-9,
+                           (y_vals.max() - y_vals.min()) / max(1, (y_vals.max() - y_vals.min()) / (SUBSAMPLE_RATE * 0.2)))
+        x_idx = np.digitize(x_vals, x_bins)
+        y_idx = np.digitize(y_vals, y_bins)
+        cell_keys = list(zip(x_idx, y_idx))
+        seen_cells = {}
+        for i, key in enumerate(cell_keys):
+            if key not in seen_cells:
+                seen_cells[key] = i
+        sample_indices = sorted(seen_cells.values())
         sample_points = self.map_df.iloc[sample_indices]
         
         print(f"\nTesting on {len(sample_points)} sample points...")
@@ -485,12 +510,19 @@ class GradientFittingAnalyzer:
                     
                     # Calculate error vs ground truth
                     true_gx, true_gy, true_angle = self.calculate_true_gradient(cx, cy)
-                    est_angle = np.degrees(np.arctan2(gy, gx))
                     
-                    angle_diff = (est_angle - true_angle + 180) % 360 - 180
-                    angle_errors.append(abs(angle_diff))
+                    if true_angle is None:
+                        # Too close to source -- skip this point entirely
+                        angle_errors.append(np.nan)
+                    else:
+                        est_angle = np.degrees(np.arctan2(gy, gx))
+                        angle_diff = (est_angle - true_angle + 180) % 360 - 180
+                        angle_errors.append(abs(angle_diff))
                 else:
-                    angle_errors.append(180)
+                    # Distinguish low-R² rejection from genuinely wrong direction:
+                    # use a sentinel value of -1 so the comparison plot can colour
+                    # these arrows differently from high-error valid estimates.
+                    angle_errors.append(-1)
             
             # Store results
             self.results[method.name] = {
@@ -502,8 +534,8 @@ class GradientFittingAnalyzer:
                 'r_squared': np.array(r_squareds),
                 'angle_error': np.array(angle_errors),
                 'success_rate': success_count / len(sample_points) * 100,
-                'mean_angle_error': np.mean([e for e in angle_errors if e < 180]),
-                'median_angle_error': np.median([e for e in angle_errors if e < 180])
+                'mean_angle_error': np.mean([e for e in angle_errors if 0 <= e < 180]),
+                'median_angle_error': np.median([e for e in angle_errors if 0 <= e < 180])
             }
             
             print(f"    Success rate: {self.results[method.name]['success_rate']:.1f}%")
@@ -535,23 +567,44 @@ class GradientFittingAnalyzer:
                       edgecolors='black', linewidth=2, 
                       label='Light Source', zorder=10)
             
-            # Plot gradient vectors (normalized to unit length for visibility)
-            mask = result['magnitude'] > 0
-            
-            # Normalize gradient vectors to unit length
-            gx_norm = result['grad_x'][mask] / (result['magnitude'][mask] + 1e-6)
-            gy_norm = result['grad_y'][mask] / (result['magnitude'][mask] + 1e-6)
-            
-            # Use fixed arrow length from configuration
-            arrow_len = ARROW_LENGTH  # All arrows are this length for visibility
-            
-            quiver = ax.quiver(result['x'][mask], result['y'][mask],
-                              gx_norm * arrow_len, gy_norm * arrow_len,
-                              result['angle_error'][mask],
-                              cmap='RdYlGn_r', alpha=0.9, 
-                              scale=1, scale_units='xy', angles='xy',
-                              width=0.004,
-                              clim=[0, 90], zorder=5)
+            # Three arrow categories drawn in separate layers:
+            #   1. Valid estimates with measurable angle error  -> RdYlGn_r colourmap
+            #   2. Low-R² rejections (sentinel -1)             -> grey arrows
+            #   3. Near-source skip (sentinel NaN)             -> not drawn
+            ae   = result['angle_error']
+            mag  = result['magnitude']
+            rx   = result['x']
+            ry   = result['y']
+            rgx  = result['grad_x']
+            rgy  = result['grad_y']
+
+            # Masks
+            valid_mask  = np.isfinite(ae) & (ae >= 0) & (mag > 0)
+            reject_mask = (ae == -1)      & (mag > 0)
+
+            def _norm_arrows(mask):
+                m = mag[mask]
+                return (rgx[mask] / (m + 1e-6) * ARROW_LENGTH,
+                        rgy[mask] / (m + 1e-6) * ARROW_LENGTH)
+
+            # -- Grey arrows for low-R² rejected estimates --
+            if reject_mask.any():
+                gx_r, gy_r = _norm_arrows(reject_mask)
+                ax.quiver(rx[reject_mask], ry[reject_mask], gx_r, gy_r,
+                          color='#888888', alpha=0.45,
+                          scale=1, scale_units='xy', angles='xy',
+                          width=0.003, zorder=4,
+                          label=f'Low R² rejected ({reject_mask.sum()})')
+
+            # -- Coloured arrows for valid estimates --
+            quiver = None
+            if valid_mask.any():
+                gx_v, gy_v = _norm_arrows(valid_mask)
+                quiver = ax.quiver(rx[valid_mask], ry[valid_mask], gx_v, gy_v,
+                                   ae[valid_mask],
+                                   cmap='RdYlGn_r', alpha=0.9,
+                                   scale=1, scale_units='xy', angles='xy',
+                                   width=0.004, clim=[0, 90], zorder=5)
             
             ax.set_xlabel('X Position (m)')
             ax.set_ylabel('Y Position (m)')
@@ -563,18 +616,19 @@ class GradientFittingAnalyzer:
             ax.set_aspect('equal')
             ax.grid(True, alpha=0.3)
             
-            # Create axes for colorbars
-            # Light intensity colorbar on the RIGHT (normal position)
+            # Colorbars
             from mpl_toolkits.axes_grid1 import make_axes_locatable
             divider = make_axes_locatable(ax)
             cax_light = divider.append_axes("right", size="2%")
-            cbar_light = plt.colorbar(scatter_bg, cax=cax_light, label='Total Light Intensity')
-            
-            # Angle error colorbar on the LEFT
-            cax_error = divider.append_axes("left", size="2%")
-            cbar_error = plt.colorbar(quiver, cax=cax_error, label='Angle Error (deg)')
-            cax_error.yaxis.set_ticks_position('left')
-            cax_error.yaxis.set_label_position('left')
+            plt.colorbar(scatter_bg, cax=cax_light, label='Total Light Intensity')
+
+            # Angle error colourbar -- only when there are valid estimates
+            if quiver is not None:
+                cax_error = divider.append_axes("left", size="2%")
+                cbar_error = plt.colorbar(quiver, cax=cax_error,
+                                          label='Angle Error (deg) — grey = low R²')
+                cax_error.yaxis.set_ticks_position('left')
+                cax_error.yaxis.set_label_position('left')
 
         
         plt.tight_layout()
@@ -610,7 +664,7 @@ class GradientFittingAnalyzer:
         ax2 = axes[0, 1]
         for method in self.methods:
             result = self.results[method.name]
-            valid_errors = [e for e in result['angle_error'] if e < 180]
+            valid_errors = [e for e in result['angle_error'] if 0 <= e < 180]
             if valid_errors:
                 ax2.hist(valid_errors, bins=30, alpha=0.5, label=method.name, edgecolor='black')
         
@@ -695,7 +749,7 @@ METHODS TESTED:
         
         for method in self.methods:
             result = self.results[method.name]
-            valid_errors = [e for e in result['angle_error'] if e < 180]
+            valid_errors = [e for e in result['angle_error'] if 0 <= e < 180]
             p90 = np.percentile(valid_errors, 90) if valid_errors else 0
             
             report += f"{method.name:<25} {result['success_rate']:>6.1f}%   "
