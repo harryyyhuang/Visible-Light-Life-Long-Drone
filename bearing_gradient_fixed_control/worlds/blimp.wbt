@@ -40,7 +40,7 @@ TexturedBackground {
 DEF blimp_lis Blimp {
   translation -3.6117324178199413 -1.3011433366849614 0.409996597976880164
   supervisor TRUE
-  controller "map_supervisor_probe"
+  controller "blimp"
 }
 
 # ===========================================================================
@@ -49,16 +49,11 @@ DEF blimp_lis Blimp {
 # (-3.6117, -1.3011, 0.41). Cone is narrow, slightly wider than a 0.4 m pillar
 # at this range.
 # ===========================================================================
-SpotLight {
-location 5.1988 5.329 1.0
+PointLight {
   location 5.1988 5.329 1.0
-  direction -0.797889 -0.600431 -0.053431
-  intensity 5
+  intensity 2
   attenuation 0.22 0 0.10
-  beamWidth 0.90
-  cutOffAngle 1.05   # 120 deg full beam -> ~60 deg half-angle
   castShadows TRUE
-  on TRUE
 }
 
 
