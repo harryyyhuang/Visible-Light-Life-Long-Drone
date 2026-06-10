@@ -40,9 +40,24 @@ MIN_R_SQUARED = 0.2          # minimum R² for accepting a fit (0.0 to 1.0)
 LIGHT_SOURCE_X = 5.1988      # meters
 LIGHT_SOURCE_Y = 5.329       # meters
 
+# Obstacle (cylinder) -- must match the Webots world (blimp.wbt: DEF PILLAR_CENTER).
+# The light casts shadows, so behind the obstacle the field gradient does NOT point
+# straight at the source; it leads around. The error metric below accounts for this.
+OBSTACLE_X = 0.8             # meters
+OBSTACLE_Y = 1.5             # meters
+OBSTACLE_RADIUS = 0.4        # meters (physical cylinder radius -> casts the light shadow)
+OBSTACLE_MARGIN = 0.5        # meters (clearance the drone keeps; no map data inside this)
+AVOID_RADIUS = OBSTACLE_RADIUS + OBSTACLE_MARGIN  # safety circle; the metric also keeps
+                                                  # the ideal path clear of THIS, not just
+                                                  # the physical cylinder, so an estimate
+                                                  # grazing the margin is judged too close
+
 # Visualization parameters
 SUBSAMPLE_RATE = 3           # Keep ~1-in-N² points via 2D grid subsampling (scatter in X and Y)
 ARROW_LENGTH = 0.4           # Fixed arrow length in meters (adjust for visibility)
+COLOR_ARROWS_BY_ERROR = True # True: colour valid arrows by angle error (RdYlGn_r + colourbar).
+                             # False: draw them in a single flat colour (ARROW_FLAT_COLOR).
+ARROW_FLAT_COLOR = 'steelblue'  # Colour used for valid arrows when COLOR_ARROWS_BY_ERROR is False
 
 # =============================================================================
 # GRADIENT ESTIMATION METHODS
@@ -413,29 +428,78 @@ class GradientFittingAnalyzer:
         
         return neighbors
     
-    def calculate_true_gradient(self, x, y):
-        """Calculate ground truth gradient direction to light source.
-        
-        Returns a unit vector pointing toward the light source and the
-        corresponding angle in degrees.  Points closer than 0.1 m to the
-        source are skipped (returned as None) because the inverse-square
-        field is so steep there that any small numerical error in the
-        estimated gradient direction produces an artificially large angle
-        error even when the direction is essentially correct.
+    def reference_direction(self, x, y):
+        """Region-aware "correct" gradient direction at (x, y).
+
+        Returns (true_angle_deg, region, avoid_unit):
+          region == 'near'   : within 0.1 m of the source -> skip (true_angle None),
+                               because the inverse-square field is so steep there that
+                               any tiny numerical error blows up the angle error.
+          region == 'free'   : the straight path to the source stays clear of the safety
+                               circle (AVOID_RADIUS), so the correct direction is straight
+                               to the source and the usual metric is valid here.
+          region == 'shadow' : the straight path to the source would enter the safety circle
+                               (it is blocked by the pillar OR grazes the keep-clear margin),
+                               so straight-to-source steers too close to the obstacle and is
+                               NOT the useful direction. true_angle is then the tangent that
+                               skirts the safety circle while making progress toward the
+                               source, and avoid_unit is its unit vector (used to score
+                               how well a method steers clear of the obstacle).
+
+        This replaces the old straight-to-source-everywhere metric, which unfairly
+        penalised any method that correctly steered around the obstacle.
         """
-        dx = LIGHT_SOURCE_X - x
-        dy = LIGHT_SOURCE_Y - y
-        dist = np.sqrt(dx**2 + dy**2)
-        
-        if dist < 0.1:          # Too close -- skip to avoid near-source artefacts
-            return None, None, None
-        
-        # Unit vector pointing toward light source
-        true_grad_x = dx / dist
-        true_grad_y = dy / dist
-        true_angle = np.degrees(np.arctan2(dy, dx))
-        
-        return true_grad_x, true_grad_y, true_angle
+        dx, dy = LIGHT_SOURCE_X - x, LIGHT_SOURCE_Y - y
+        dist = np.hypot(dx, dy)
+        if dist < 0.1:                       # near-source: field too steep to score
+            return None, 'near', None
+
+        # Is the straight path from here to the source blocked by the obstacle?
+        if not self._segment_hits_obstacle(x, y, LIGHT_SOURCE_X, LIGHT_SOURCE_Y):
+            return np.degrees(np.arctan2(dy, dx)), 'free', None
+
+        # Blocked -> the correct direction skirts the obstacle (visibility-graph hop).
+        av = self._avoidance_dir(x, y)
+        if av is None:                       # inside the safety circle (probe leaves no data here)
+            return np.degrees(np.arctan2(dy, dx)), 'free', None
+        return np.degrees(np.arctan2(av[1], av[0])), 'shadow', av
+
+    @staticmethod
+    def _segment_hits_obstacle(px, py, qx, qy):
+        """True if segment P->Q passes within AVOID_RADIUS of the obstacle centre, i.e.
+        the straight path would enter the keep-clear safety circle (physical pillar plus
+        margin), not merely touch the physical cylinder."""
+        dx, dy = qx - px, qy - py
+        L2 = dx * dx + dy * dy
+        if L2 < 1e-12:
+            return (px - OBSTACLE_X) ** 2 + (py - OBSTACLE_Y) ** 2 <= AVOID_RADIUS ** 2
+        t = ((OBSTACLE_X - px) * dx + (OBSTACLE_Y - py) * dy) / L2
+        t = max(0.0, min(1.0, t))           # nearest point on the segment to the centre
+        nx, ny = px + t * dx, py + t * dy
+        return (nx - OBSTACLE_X) ** 2 + (ny - OBSTACLE_Y) ** 2 <= AVOID_RADIUS ** 2
+
+    @staticmethod
+    def _avoidance_dir(x, y):
+        """Unit tangent direction around the safety circle that heads toward the source.
+
+        From (x, y) there are two tangents to the keep-clear circle (AVOID_RADIUS); we
+        return the one whose direction is more aligned with the straight-to-source
+        direction, i.e. the short way around. Skirting the safety circle rather than the
+        bare cylinder keeps the ideal path a margin clear of the obstacle.
+        """
+        cx, cy = OBSTACLE_X - x, OBSTACLE_Y - y      # vector to the obstacle centre
+        d = np.hypot(cx, cy)
+        if d <= AVOID_RADIUS:
+            return None
+        ucx, ucy = cx / d, cy / d
+        phi = np.arcsin(min(1.0, AVOID_RADIUS / d))      # half-angle to the two tangents
+        c, s = np.cos(phi), np.sin(phi)
+        t1 = (ucx * c - ucy * s, ucx * s + ucy * c)      # to-centre rotated by +phi
+        t2 = (ucx * c + ucy * s, -ucx * s + ucy * c)     # to-centre rotated by -phi
+        sx, sy = LIGHT_SOURCE_X - x, LIGHT_SOURCE_Y - y
+        sn = np.hypot(sx, sy)
+        sx, sy = sx / sn, sy / sn
+        return t1 if (t1[0] * sx + t1[1] * sy) >= (t2[0] * sx + t2[1] * sy) else t2
     
     def test_all_methods(self):
         """Test all gradient estimation methods on sample points."""
@@ -481,50 +545,56 @@ class GradientFittingAnalyzer:
             magnitudes = []
             r_squareds = []
             angle_errors = []
+            regions = []        # 'free' | 'shadow' | 'near' | 'fail'
+            avoid_align = []    # shadow only: cos(angle) between estimate and avoidance dir
             success_count = 0
-            
+
             for idx, row in sample_points.iterrows():
                 cx, cy = row['x'], row['y']
-                
-                # Get neighbors
                 neighbors = self.get_neighbors(cx, cy)
-                
+
                 if len(neighbors) < MIN_NEIGHBOR_COUNT:
-                    gradients_x.append(0)
-                    gradients_y.append(0)
-                    magnitudes.append(0)
-                    r_squareds.append(0)
-                    angle_errors.append(180)
+                    gradients_x.append(0); gradients_y.append(0)
+                    magnitudes.append(0); r_squareds.append(0)
+                    angle_errors.append(180); regions.append('fail'); avoid_align.append(np.nan)
                     continue
-                
-                # Estimate gradient
+
                 gx, gy, mag, r2, success = method.estimate(cx, cy, neighbors)
-                
-                gradients_x.append(gx)
-                gradients_y.append(gy)
-                magnitudes.append(mag)
-                r_squareds.append(r2)
-                
-                if success:
-                    success_count += 1
-                    
-                    # Calculate error vs ground truth
-                    true_gx, true_gy, true_angle = self.calculate_true_gradient(cx, cy)
-                    
-                    if true_angle is None:
-                        # Too close to source -- skip this point entirely
-                        angle_errors.append(np.nan)
-                    else:
-                        est_angle = np.degrees(np.arctan2(gy, gx))
-                        angle_diff = (est_angle - true_angle + 180) % 360 - 180
-                        angle_errors.append(abs(angle_diff))
+                gradients_x.append(gx); gradients_y.append(gy)
+                magnitudes.append(mag); r_squareds.append(r2)
+
+                if not success:
+                    # sentinel -1 so the comparison plot can colour rejects in grey
+                    angle_errors.append(-1); regions.append('fail'); avoid_align.append(np.nan)
+                    continue
+
+                success_count += 1
+                # Region-aware ground truth: straight-to-source in free space, the
+                # tangent around the obstacle in its shadow (see reference_direction).
+                true_angle, region, av = self.reference_direction(cx, cy)
+                regions.append(region)
+                if true_angle is None:                 # near-source: drop from the stats
+                    angle_errors.append(np.nan); avoid_align.append(np.nan)
+                    continue
+                est_angle = np.degrees(np.arctan2(gy, gx))
+                angle_errors.append(abs((est_angle - true_angle + 180) % 360 - 180))
+                if region == 'shadow' and av is not None and mag > 0:
+                    avoid_align.append((gx * av[0] + gy * av[1]) / mag)
                 else:
-                    # Distinguish low-R² rejection from genuinely wrong direction:
-                    # use a sentinel value of -1 so the comparison plot can colour
-                    # these arrows differently from high-error valid estimates.
-                    angle_errors.append(-1)
-            
-            # Store results
+                    avoid_align.append(np.nan)
+
+            angle_errors = np.array(angle_errors, dtype=float)
+            regions = np.array(regions)
+            avoid_align = np.array(avoid_align, dtype=float)
+
+            valid = (angle_errors >= 0) & (angle_errors < 180)
+            free_mask = valid & (regions == 'free')
+            shadow_mask = valid & (regions == 'shadow')
+
+            def _stat(arr, fn):
+                arr = arr[np.isfinite(arr)]
+                return float(fn(arr)) if arr.size else float('nan')
+
             self.results[method.name] = {
                 'x': sample_points['x'].values,
                 'y': sample_points['y'].values,
@@ -532,17 +602,33 @@ class GradientFittingAnalyzer:
                 'grad_y': np.array(gradients_y),
                 'magnitude': np.array(magnitudes),
                 'r_squared': np.array(r_squareds),
-                'angle_error': np.array(angle_errors),
+                'angle_error': angle_errors,
+                'region': regions,
+                'avoid_align': avoid_align,
                 'success_rate': success_count / len(sample_points) * 100,
-                'mean_angle_error': np.mean([e for e in angle_errors if 0 <= e < 180]),
-                'median_angle_error': np.median([e for e in angle_errors if 0 <= e < 180])
+                'mean_angle_error': _stat(angle_errors[valid], np.mean),
+                'median_angle_error': _stat(angle_errors[valid], np.median),
+                'free_mean_error': _stat(angle_errors[free_mask], np.mean),
+                'free_median_error': _stat(angle_errors[free_mask], np.median),
+                'shadow_mean_error': _stat(angle_errors[shadow_mask], np.mean),
+                'shadow_align_mean': _stat(avoid_align[shadow_mask], np.mean),
+                'n_free': int(free_mask.sum()),
+                'n_shadow': int(shadow_mask.sum()),
             }
-            
-            print(f"    Success rate: {self.results[method.name]['success_rate']:.1f}%")
-            print(f"    Mean angle error: {self.results[method.name]['mean_angle_error']:.2f}°")
+
+            r = self.results[method.name]
+            print(f"    Success: {r['success_rate']:.1f}% | "
+                  f"free-space err: {r['free_mean_error']:.1f} deg | "
+                  f"shadow deviation: {r['shadow_mean_error']:.1f} deg "
+                  f"(n_free={r['n_free']}, n_shadow={r['n_shadow']})")
     
-    def create_comparison_plots(self):
-        """Create visual comparison of all methods."""
+    def create_comparison_plots(self, color_by_error=COLOR_ARROWS_BY_ERROR):
+        """Create visual comparison of all methods.
+
+        color_by_error: when True, valid arrows are coloured by angle error and an
+        error colourbar is added; when False, they are drawn in a single flat colour
+        (ARROW_FLAT_COLOR). Defaults to the module-level COLOR_ARROWS_BY_ERROR.
+        """
         print("\n[INFO] Creating comparison plots...")
         
         n_methods = len(self.methods)
@@ -562,10 +648,18 @@ class GradientFittingAnalyzer:
                                    vmin=0, vmax=self.map_df['total_light'].max())
             
             # Plot light source
-            ax.scatter([LIGHT_SOURCE_X], [LIGHT_SOURCE_Y], 
-                      color='gold', s=500, marker='*', 
-                      edgecolors='black', linewidth=2, 
+            ax.scatter([LIGHT_SOURCE_X], [LIGHT_SOURCE_Y],
+                      color='gold', s=500, marker='*',
+                      edgecolors='black', linewidth=2,
                       label='Light Source', zorder=10)
+
+            # Obstacle (physical cylinder) and the safety circle the drone keeps clear
+            from matplotlib.patches import Circle
+            ax.add_patch(Circle((OBSTACLE_X, OBSTACLE_Y), OBSTACLE_RADIUS,
+                                facecolor='dimgray', edgecolor='black', zorder=9,
+                                label='Obstacle'))
+            ax.add_patch(Circle((OBSTACLE_X, OBSTACLE_Y), AVOID_RADIUS,
+                                fill=False, linestyle='--', edgecolor='gray', zorder=9))
             
             # Three arrow categories drawn in separate layers:
             #   1. Valid estimates with measurable angle error  -> RdYlGn_r colourmap
@@ -596,22 +690,29 @@ class GradientFittingAnalyzer:
                           width=0.003, zorder=4,
                           label=f'Low R² rejected ({reject_mask.sum()})')
 
-            # -- Coloured arrows for valid estimates --
+            # -- Arrows for valid estimates: coloured by error or a single flat colour --
             quiver = None
             if valid_mask.any():
                 gx_v, gy_v = _norm_arrows(valid_mask)
-                quiver = ax.quiver(rx[valid_mask], ry[valid_mask], gx_v, gy_v,
-                                   ae[valid_mask],
-                                   cmap='RdYlGn_r', alpha=0.9,
-                                   scale=1, scale_units='xy', angles='xy',
-                                   width=0.004, clim=[0, 90], zorder=5)
+                if color_by_error:
+                    quiver = ax.quiver(rx[valid_mask], ry[valid_mask], gx_v, gy_v,
+                                       ae[valid_mask],
+                                       cmap='RdYlGn_r', alpha=0.9,
+                                       scale=1, scale_units='xy', angles='xy',
+                                       width=0.004, clim=[0, 90], zorder=5)
+                else:
+                    ax.quiver(rx[valid_mask], ry[valid_mask], gx_v, gy_v,
+                              color=ARROW_FLAT_COLOR, alpha=0.9,
+                              scale=1, scale_units='xy', angles='xy',
+                              width=0.004, zorder=5,
+                              label=f'Valid estimate ({valid_mask.sum()})')
             
             ax.set_xlabel('X Position (m)')
             ax.set_ylabel('Y Position (m)')
             ax.set_title(f'{method.name} - {method.description}\n'
                         f'Success: {result["success_rate"]:.1f}% | '
-                        f'Mean Error: {result["mean_angle_error"]:.1f}° | '
-                        f'Median Error: {result["median_angle_error"]:.1f}°',
+                        f'Free-space error: {result["free_mean_error"]:.1f}° | '
+                        f'Shadow deviation: {result["shadow_mean_error"]:.1f}°',
                         fontweight='bold')
             ax.set_aspect('equal')
             ax.grid(True, alpha=0.3)
@@ -636,77 +737,63 @@ class GradientFittingAnalyzer:
         print("[SUCCESS] Saved comparison plots to 'gradient_method_comparison.png'")
     
     def create_performance_plots(self):
-        """Create performance analysis plots."""
+        """Region-conditioned performance plots.
+
+        Free-space accuracy (where straight-to-source is the correct answer) is the
+        valid ranking metric; the shadow panel reports how well each method steers
+        AROUND the obstacle, which is what the controller actually needs there.
+        """
         print("\n[INFO] Creating performance analysis plots...")
-        
+
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-        
-        # 1. Success rate comparison
-        ax1 = axes[0, 0]
-        method_names = [m.name for m in self.methods]
-        success_rates = [self.results[name]['success_rate'] for name in method_names]
-        
-        bars = ax1.bar(range(len(method_names)), success_rates, color='steelblue', edgecolor='black')
-        ax1.set_xticks(range(len(method_names)))
-        ax1.set_xticklabels(method_names, rotation=45, ha='right')
-        ax1.set_ylabel('Success Rate (%)')
-        ax1.set_title('Gradient Estimation Success Rate', fontweight='bold')
-        ax1.set_ylim([0, 100])
-        ax1.grid(True, alpha=0.3, axis='y')
-        
-        # Add value labels on bars
-        for bar, val in zip(bars, success_rates):
-            height = bar.get_height()
-            ax1.text(bar.get_x() + bar.get_width()/2., height,
-                    f'{val:.1f}%', ha='center', va='bottom', fontweight='bold')
-        
-        # 2. Angle error distribution
-        ax2 = axes[0, 1]
-        for method in self.methods:
-            result = self.results[method.name]
-            valid_errors = [e for e in result['angle_error'] if 0 <= e < 180]
-            if valid_errors:
-                ax2.hist(valid_errors, bins=30, alpha=0.5, label=method.name, edgecolor='black')
-        
-        ax2.set_xlabel('Angle Error (deg)')
-        ax2.set_ylabel('Frequency')
-        ax2.set_title('Distribution of Gradient Direction Errors', fontweight='bold')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-        
-        # 3. Mean angle error comparison
-        ax3 = axes[1, 0]
-        mean_errors = [self.results[name]['mean_angle_error'] for name in method_names]
-        
-        bars = ax3.bar(range(len(method_names)), mean_errors, color='coral', edgecolor='black')
-        ax3.set_xticks(range(len(method_names)))
-        ax3.set_xticklabels(method_names, rotation=45, ha='right')
-        ax3.set_ylabel('Mean Angle Error (deg)')
-        ax3.set_title('Average Gradient Direction Error', fontweight='bold')
-        ax3.grid(True, alpha=0.3, axis='y')
-        
-        for bar, val in zip(bars, mean_errors):
-            height = bar.get_height()
-            ax3.text(bar.get_x() + bar.get_width()/2., height,
-                    f'{val:.1f}°', ha='center', va='bottom', fontweight='bold')
-        
-        # 4. CDF comparison
+        names = [m.name for m in self.methods]
+
+        def _bars(ax, vals, color, ylabel, title, fmt, ylim=None):
+            bars = ax.bar(range(len(names)), vals, color=color, edgecolor='black')
+            ax.set_xticks(range(len(names)))
+            ax.set_xticklabels(names, rotation=45, ha='right')
+            ax.set_ylabel(ylabel)
+            ax.set_title(title, fontweight='bold')
+            if ylim:
+                ax.set_ylim(ylim)
+            ax.grid(True, alpha=0.3, axis='y')
+            for b, v in zip(bars, vals):
+                ax.text(b.get_x() + b.get_width() / 2., b.get_height(),
+                        fmt.format(v), ha='center', va='bottom', fontweight='bold')
+
+        # 1. Success rate
+        _bars(axes[0, 0], [self.results[n]['success_rate'] for n in names],
+              'steelblue', 'Success Rate (%)', 'Gradient Estimation Success Rate',
+              '{:.1f}%', ylim=[0, 100])
+
+        # 2. Free-space accuracy -- the valid metric for ranking
+        _bars(axes[0, 1], [self.results[n]['free_mean_error'] for n in names],
+              'coral', 'Mean Angle Error (deg)',
+              'Accuracy in Free Space\n(line of sight to source clear)', '{:.1f}°')
+
+        # 3. Obstacle avoidance behind the pillar -- mean deviation from the escape
+        #    (tangent) direction, in degrees so it reads like the free-space error.
+        _bars(axes[1, 0], [self.results[n]['shadow_mean_error'] for n in names],
+              'seagreen', 'Mean Deviation from Escape Dir. (deg)',
+              'Obstacle Avoidance in the Shadow\n(deviation from the way around the pillar)',
+              '{:.1f}°')
+
+        # 4. CDF of FREE-SPACE errors only (where the metric is valid)
         ax4 = axes[1, 1]
         for method in self.methods:
-            result = self.results[method.name]
-            valid_errors = sorted([e for e in result['angle_error'] if e < 180])
-            if valid_errors:
-                cdf = np.arange(1, len(valid_errors) + 1) / len(valid_errors) * 100
-                ax4.plot(valid_errors, cdf, linewidth=2, label=method.name)
-        
+            r = self.results[method.name]
+            e = np.sort(r['angle_error'][(r['region'] == 'free') &
+                                         (r['angle_error'] >= 0) & (r['angle_error'] < 180)])
+            if e.size:
+                ax4.plot(e, np.arange(1, e.size + 1) / e.size * 100, linewidth=2, label=method.name)
         ax4.axvline(x=10, color='green', linestyle='--', alpha=0.5, label='10° threshold')
         ax4.axvline(x=30, color='orange', linestyle='--', alpha=0.5, label='30° threshold')
-        ax4.set_xlabel('Angle Error (deg)')
+        ax4.set_xlabel('Free-space Angle Error (deg)')
         ax4.set_ylabel('Cumulative Percentage (%)')
-        ax4.set_title('CDF of Gradient Direction Errors', fontweight='bold')
+        ax4.set_title('CDF of Free-space Direction Errors', fontweight='bold')
         ax4.legend()
         ax4.grid(True, alpha=0.3)
-        
+
         plt.tight_layout()
         plt.savefig('plots/gradient_method_performance.png', dpi=300, bbox_inches='tight')
         print("[SUCCESS] Saved performance analysis to 'gradient_method_performance.png'")
@@ -743,41 +830,44 @@ METHODS TESTED:
         
         report += f"\n\n{'=' * 70}\nRESULTS SUMMARY\n{'=' * 70}\n\n"
         
-        # Create comparison table
-        report += f"{'Method':<25} {'Success':<10} {'Mean Err':<12} {'Median Err':<12} {'90th %ile':<10}\n"
-        report += "-" * 70 + "\n"
-        
+        # Region-conditioned comparison table
+        report += (f"{'Method':<24} {'Success':<9} {'Free err':<10} "
+                   f"{'Free med':<10} {'Shadow dev':<12}\n")
+        report += "-" * 66 + "\n"
         for method in self.methods:
-            result = self.results[method.name]
-            valid_errors = [e for e in result['angle_error'] if 0 <= e < 180]
-            p90 = np.percentile(valid_errors, 90) if valid_errors else 0
-            
-            report += f"{method.name:<25} {result['success_rate']:>6.1f}%   "
-            report += f"{result['mean_angle_error']:>8.2f}°   "
-            report += f"{result['median_angle_error']:>8.2f}°   "
-            report += f"{p90:>8.2f}°\n"
-        
+            r = self.results[method.name]
+            report += (f"{method.name:<24} {r['success_rate']:>6.1f}%  "
+                       f"{r['free_mean_error']:>7.1f}°  "
+                       f"{r['free_median_error']:>7.1f}°  "
+                       f"{r['shadow_mean_error']:>8.1f}°\n")
+        report += ("\nFree err / Free med : mean / median angle error in free space, "
+                   "where straight-to-source is the correct answer.\n"
+                   "Shadow dev          : mean deviation behind the obstacle from the escape "
+                   "(tangent-around) direction; lower means it steers around the pillar.\n")
+
         report += f"\n\n{'=' * 70}\nDETAILED ANALYSIS\n{'=' * 70}\n"
-        
-        # Find best method for each metric
+
+        # Rank on the valid metrics: free-space accuracy and obstacle escape
         best_success = max(self.methods, key=lambda m: self.results[m.name]['success_rate'])
-        best_accuracy = min(self.methods, key=lambda m: self.results[m.name]['mean_angle_error'])
-        
-        report += f"\nBest Success Rate: {best_success.name} ({self.results[best_success.name]['success_rate']:.1f}%)\n"
-        report += f"Best Accuracy: {best_accuracy.name} ({self.results[best_accuracy.name]['mean_angle_error']:.2f}° mean error)\n"
+        best_accuracy = min(self.methods, key=lambda m: self.results[m.name]['free_mean_error'])
+        best_escape = min(self.methods, key=lambda m: self.results[m.name]['shadow_mean_error'])
+
+        report += f"\nBest Success Rate:        {best_success.name} ({self.results[best_success.name]['success_rate']:.1f}%)\n"
+        report += f"Best Free-space Accuracy: {best_accuracy.name} ({self.results[best_accuracy.name]['free_mean_error']:.1f}° mean)\n"
+        report += f"Best Obstacle Escape:     {best_escape.name} ({self.results[best_escape.name]['shadow_mean_error']:.1f}° deviation)\n"
         
         report += f"\n\nRECOMMENDATIONS:\n"
         report += "-" * 70 + "\n"
         
         # Provide recommendations based on results
-        if self.results[best_accuracy.name]['mean_angle_error'] < 15:
+        if self.results[best_accuracy.name]['free_mean_error'] < 15:
             report += f"✓ EXCELLENT: {best_accuracy.name} achieves <15° mean error\n"
             report += f"  Recommended for production use\n"
-        elif self.results[best_accuracy.name]['mean_angle_error'] < 30:
+        elif self.results[best_accuracy.name]['free_mean_error'] < 30:
             report += f"✓ GOOD: {best_accuracy.name} achieves <30° mean error\n"
             report += f"  Suitable for navigation with some inaccuracy\n"
         else:
-            report += f"⚠ POOR: Best method still has >{self.results[best_accuracy.name]['mean_angle_error']:.1f}° error\n"
+            report += f"⚠ POOR: Best method still has >{self.results[best_accuracy.name]['free_mean_error']:.1f}° error\n"
             report += f"  Consider: adjusting parameters, adding more map points, or obstacle handling\n"
         
         report += f"\n\nFILES GENERATED:\n"
