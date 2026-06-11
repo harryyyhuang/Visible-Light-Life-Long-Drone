@@ -583,13 +583,18 @@ class GradientFittingAnalyzer:
         print("\n[INFO] Creating comparison plots...")
         
         n_methods = len(self.methods)
-        fig = plt.figure(figsize=(20, 4 * n_methods))
+        # Lay the per-method panels out in a grid rather than a tall single column,
+        # so the figure is landscape and fills the page width. 3 columns for 5-6
+        # methods gives a 2x3 grid (the unused cell, if any, is left blank).
+        n_cols = 2 if n_methods <= 4 else 3
+        n_rows = int(np.ceil(n_methods / n_cols))
+        fig = plt.figure(figsize=(7.5 * n_cols, 6.8 * n_rows))
         
         for idx, method in enumerate(self.methods):
             result = self.results[method.name]
             
             # Vector field plot
-            ax = fig.add_subplot(n_methods, 1, idx + 1)
+            ax = fig.add_subplot(n_rows, n_cols, idx + 1)
             
             # Plot all map points colored by light intensity
             scatter_bg = ax.scatter(self.map_df['x'], self.map_df['y'], 
@@ -664,26 +669,27 @@ class GradientFittingAnalyzer:
                         f'Success: {result["success_rate"]:.1f}% | '
                         f'Common-coverage err: {result["common_mean_error"]:.1f}° | '
                         f'Own-coverage err: {result["mean_angle_error"]:.1f}°',
-                        fontweight='bold')
+                        fontweight='bold', fontsize=9)
             ax.set_aspect('equal')
             ax.grid(True, alpha=0.3)
             
-            # Colorbars
-            from mpl_toolkits.axes_grid1 import make_axes_locatable
-            divider = make_axes_locatable(ax)
-            cax_light = divider.append_axes("right", size="2%")
-            plt.colorbar(scatter_bg, cax=cax_light, label='Total Light Intensity')
+        # Shared colourbars for the whole grid, cleaner than one pair per panel
+        import matplotlib.cm as cm
+        from matplotlib.colors import Normalize
+        fig.tight_layout(rect=[0, 0, 0.92, 1])
 
-            # Angle error colourbar -- only when there are valid estimates
-            if quiver is not None:
-                cax_error = divider.append_axes("left", size="2%")
-                cbar_error = plt.colorbar(quiver, cax=cax_error,
-                                          label='Angle error vs straight-to-source (deg) — grey = low R²')
-                cax_error.yaxis.set_ticks_position('left')
-                cax_error.yaxis.set_label_position('left')
+        light_sm = cm.ScalarMappable(cmap='viridis',
+                                     norm=Normalize(0, self.map_df['total_light'].max()))
+        light_sm.set_array([])
+        fig.colorbar(light_sm, cax=fig.add_axes([0.94, 0.55, 0.015, 0.35]),
+                     label='Total Light Intensity')
 
-        
-        plt.tight_layout()
+        if color_by_error:
+            err_sm = cm.ScalarMappable(cmap='RdYlGn_r', norm=Normalize(0, 90))
+            err_sm.set_array([])
+            fig.colorbar(err_sm, cax=fig.add_axes([0.94, 0.10, 0.015, 0.35]),
+                         label='Angle error vs straight-to-source (deg); grey = low R²')
+
         plt.savefig('plots/gradient_method_comparison.png', dpi=300, bbox_inches='tight')
         print("[SUCCESS] Saved comparison plots to 'gradient_method_comparison.png'")
     
