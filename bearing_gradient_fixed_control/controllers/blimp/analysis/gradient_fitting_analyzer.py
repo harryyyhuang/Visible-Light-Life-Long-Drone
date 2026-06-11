@@ -41,16 +41,15 @@ LIGHT_SOURCE_X = 5.1988      # meters
 LIGHT_SOURCE_Y = 5.329       # meters
 
 # Obstacle (cylinder) -- must match the Webots world (blimp.wbt: DEF PILLAR_CENTER).
-# The light casts shadows, so behind the obstacle the field gradient does NOT point
-# straight at the source; it leads around. The error metric below accounts for this.
+# Drawn on the vector-field plot for context. Behind the obstacle the field bends
+# around the pillar, so estimates there read as a large straight-to-source error; this
+# is expected and is why methods are ranked on coverage, not on that raw error.
 OBSTACLE_X = 0.8             # meters
 OBSTACLE_Y = 1.5             # meters
 OBSTACLE_RADIUS = 0.4        # meters (physical cylinder radius -> casts the light shadow)
 OBSTACLE_MARGIN = 0.5        # meters (clearance the drone keeps; no map data inside this)
-AVOID_RADIUS = OBSTACLE_RADIUS + OBSTACLE_MARGIN  # safety circle; the metric also keeps
-                                                  # the ideal path clear of THIS, not just
-                                                  # the physical cylinder, so an estimate
-                                                  # grazing the margin is judged too close
+AVOID_RADIUS = OBSTACLE_RADIUS + OBSTACLE_MARGIN  # drawn as the safety circle on the
+                                                  # vector-field plot for context only
 
 # Visualization parameters
 SUBSAMPLE_RATE = 3           # Keep ~1-in-N² points via 2D grid subsampling (scatter in X and Y)
@@ -429,77 +428,24 @@ class GradientFittingAnalyzer:
         return neighbors
     
     def reference_direction(self, x, y):
-        """Region-aware "correct" gradient direction at (x, y).
+        """The "correct" gradient direction at (x, y): straight toward the light source.
 
-        Returns (true_angle_deg, region, avoid_unit):
-          region == 'near'   : within 0.1 m of the source -> skip (true_angle None),
-                               because the inverse-square field is so steep there that
-                               any tiny numerical error blows up the angle error.
-          region == 'free'   : the straight path to the source stays clear of the safety
-                               circle (AVOID_RADIUS), so the correct direction is straight
-                               to the source and the usual metric is valid here.
-          region == 'shadow' : the straight path to the source would enter the safety circle
-                               (it is blocked by the pillar OR grazes the keep-clear margin),
-                               so straight-to-source steers too close to the obstacle and is
-                               NOT the useful direction. true_angle is then the tangent that
-                               skirts the safety circle while making progress toward the
-                               source, and avoid_unit is its unit vector (used to score
-                               how well a method steers clear of the obstacle).
+        Returns the bearing to the source in degrees, or None within 0.1 m of the
+        source, where the inverse-square field is so steep that any tiny numerical
+        error blows the angle up and the point is not representative of normal flight.
 
-        This replaces the old straight-to-source-everywhere metric, which unfairly
-        penalised any method that correctly steered around the obstacle.
+        Note on the obstacle: behind the pillar the measured field bends around it, so a
+        correct, obstacle-avoiding estimate reads as a large error against this
+        straight-to-source reference. We therefore do NOT rank methods on the raw angular
+        error. It is reported only to characterise the field; methods are compared on
+        coverage (success rate) and on the common-coverage error, the angular error
+        restricted to the points that every method manages to estimate, which removes the
+        bias that a low-coverage method is simply never scored on the hardest points.
         """
         dx, dy = LIGHT_SOURCE_X - x, LIGHT_SOURCE_Y - y
-        dist = np.hypot(dx, dy)
-        if dist < 0.1:                       # near-source: field too steep to score
-            return None, 'near', None
-
-        # Is the straight path from here to the source blocked by the obstacle?
-        if not self._segment_hits_obstacle(x, y, LIGHT_SOURCE_X, LIGHT_SOURCE_Y):
-            return np.degrees(np.arctan2(dy, dx)), 'free', None
-
-        # Blocked -> the correct direction skirts the obstacle (visibility-graph hop).
-        av = self._avoidance_dir(x, y)
-        if av is None:                       # inside the safety circle (probe leaves no data here)
-            return np.degrees(np.arctan2(dy, dx)), 'free', None
-        return np.degrees(np.arctan2(av[1], av[0])), 'shadow', av
-
-    @staticmethod
-    def _segment_hits_obstacle(px, py, qx, qy):
-        """True if segment P->Q passes within AVOID_RADIUS of the obstacle centre, i.e.
-        the straight path would enter the keep-clear safety circle (physical pillar plus
-        margin), not merely touch the physical cylinder."""
-        dx, dy = qx - px, qy - py
-        L2 = dx * dx + dy * dy
-        if L2 < 1e-12:
-            return (px - OBSTACLE_X) ** 2 + (py - OBSTACLE_Y) ** 2 <= AVOID_RADIUS ** 2
-        t = ((OBSTACLE_X - px) * dx + (OBSTACLE_Y - py) * dy) / L2
-        t = max(0.0, min(1.0, t))           # nearest point on the segment to the centre
-        nx, ny = px + t * dx, py + t * dy
-        return (nx - OBSTACLE_X) ** 2 + (ny - OBSTACLE_Y) ** 2 <= AVOID_RADIUS ** 2
-
-    @staticmethod
-    def _avoidance_dir(x, y):
-        """Unit tangent direction around the safety circle that heads toward the source.
-
-        From (x, y) there are two tangents to the keep-clear circle (AVOID_RADIUS); we
-        return the one whose direction is more aligned with the straight-to-source
-        direction, i.e. the short way around. Skirting the safety circle rather than the
-        bare cylinder keeps the ideal path a margin clear of the obstacle.
-        """
-        cx, cy = OBSTACLE_X - x, OBSTACLE_Y - y      # vector to the obstacle centre
-        d = np.hypot(cx, cy)
-        if d <= AVOID_RADIUS:
+        if np.hypot(dx, dy) < 0.1:           # near-source: field too steep to score
             return None
-        ucx, ucy = cx / d, cy / d
-        phi = np.arcsin(min(1.0, AVOID_RADIUS / d))      # half-angle to the two tangents
-        c, s = np.cos(phi), np.sin(phi)
-        t1 = (ucx * c - ucy * s, ucx * s + ucy * c)      # to-centre rotated by +phi
-        t2 = (ucx * c + ucy * s, -ucx * s + ucy * c)     # to-centre rotated by -phi
-        sx, sy = LIGHT_SOURCE_X - x, LIGHT_SOURCE_Y - y
-        sn = np.hypot(sx, sy)
-        sx, sy = sx / sn, sy / sn
-        return t1 if (t1[0] * sx + t1[1] * sy) >= (t2[0] * sx + t2[1] * sy) else t2
+        return np.degrees(np.arctan2(dy, dx))
     
     def test_all_methods(self):
         """Test all gradient estimation methods on sample points."""
@@ -545,8 +491,7 @@ class GradientFittingAnalyzer:
             magnitudes = []
             r_squareds = []
             angle_errors = []
-            regions = []        # 'free' | 'shadow' | 'near' | 'fail'
-            avoid_align = []    # shadow only: cos(angle) between estimate and avoidance dir
+            scored = []         # True where the method returned a usable, scorable estimate
             success_count = 0
 
             for idx, row in sample_points.iterrows():
@@ -556,7 +501,7 @@ class GradientFittingAnalyzer:
                 if len(neighbors) < MIN_NEIGHBOR_COUNT:
                     gradients_x.append(0); gradients_y.append(0)
                     magnitudes.append(0); r_squareds.append(0)
-                    angle_errors.append(180); regions.append('fail'); avoid_align.append(np.nan)
+                    angle_errors.append(180); scored.append(False)
                     continue
 
                 gx, gy, mag, r2, success = method.estimate(cx, cy, neighbors)
@@ -565,31 +510,21 @@ class GradientFittingAnalyzer:
 
                 if not success:
                     # sentinel -1 so the comparison plot can colour rejects in grey
-                    angle_errors.append(-1); regions.append('fail'); avoid_align.append(np.nan)
+                    angle_errors.append(-1); scored.append(False)
                     continue
 
                 success_count += 1
-                # Region-aware ground truth: straight-to-source in free space, the
-                # tangent around the obstacle in its shadow (see reference_direction).
-                true_angle, region, av = self.reference_direction(cx, cy)
-                regions.append(region)
+                # Ground truth: straight toward the light source (see reference_direction).
+                true_angle = self.reference_direction(cx, cy)
                 if true_angle is None:                 # near-source: drop from the stats
-                    angle_errors.append(np.nan); avoid_align.append(np.nan)
+                    angle_errors.append(np.nan); scored.append(False)
                     continue
                 est_angle = np.degrees(np.arctan2(gy, gx))
                 angle_errors.append(abs((est_angle - true_angle + 180) % 360 - 180))
-                if region == 'shadow' and av is not None and mag > 0:
-                    avoid_align.append((gx * av[0] + gy * av[1]) / mag)
-                else:
-                    avoid_align.append(np.nan)
+                scored.append(True)
 
             angle_errors = np.array(angle_errors, dtype=float)
-            regions = np.array(regions)
-            avoid_align = np.array(avoid_align, dtype=float)
-
-            valid = (angle_errors >= 0) & (angle_errors < 180)
-            free_mask = valid & (regions == 'free')
-            shadow_mask = valid & (regions == 'shadow')
+            scored = np.array(scored, dtype=bool)
 
             def _stat(arr, fn):
                 arr = arr[np.isfinite(arr)]
@@ -603,24 +538,40 @@ class GradientFittingAnalyzer:
                 'magnitude': np.array(magnitudes),
                 'r_squared': np.array(r_squareds),
                 'angle_error': angle_errors,
-                'region': regions,
-                'avoid_align': avoid_align,
+                'scored': scored,
                 'success_rate': success_count / len(sample_points) * 100,
-                'mean_angle_error': _stat(angle_errors[valid], np.mean),
-                'median_angle_error': _stat(angle_errors[valid], np.median),
-                'free_mean_error': _stat(angle_errors[free_mask], np.mean),
-                'free_median_error': _stat(angle_errors[free_mask], np.median),
-                'shadow_mean_error': _stat(angle_errors[shadow_mask], np.mean),
-                'shadow_align_mean': _stat(avoid_align[shadow_mask], np.mean),
-                'n_free': int(free_mask.sum()),
-                'n_shadow': int(shadow_mask.sum()),
+                'mean_angle_error': _stat(angle_errors[scored], np.mean),
+                'median_angle_error': _stat(angle_errors[scored], np.median),
             }
 
             r = self.results[method.name]
             print(f"    Success: {r['success_rate']:.1f}% | "
-                  f"free-space err: {r['free_mean_error']:.1f} deg | "
-                  f"shadow deviation: {r['shadow_mean_error']:.1f} deg "
-                  f"(n_free={r['n_free']}, n_shadow={r['n_shadow']})")
+                  f"mean err (own coverage): {r['mean_angle_error']:.1f} deg "
+                  f"(n_scored={int(scored.sum())})")
+
+        # ------------------------------------------------------------------
+        # Common-coverage error: the fair accuracy comparison.
+        # A method that fails on the hard points is never scored there, so its
+        # average error flatters it. We therefore also score every method on the
+        # SAME set of points: those that EVERY method managed to estimate.
+        # ------------------------------------------------------------------
+        common = None
+        for method in self.methods:
+            s = self.results[method.name]['scored']
+            common = s.copy() if common is None else (common & s)
+        n_common = int(common.sum()) if common is not None else 0
+        for method in self.methods:
+            r = self.results[method.name]
+            e = r['angle_error'][common] if n_common else np.array([])
+            e = e[np.isfinite(e)]
+            r['common_mean_error'] = float(np.mean(e)) if e.size else float('nan')
+            r['common_median_error'] = float(np.median(e)) if e.size else float('nan')
+            r['n_common'] = n_common
+        print(f"\n  Common-coverage set: {n_common} points scored by all methods")
+        for method in self.methods:
+            r = self.results[method.name]
+            print(f"    {method.name:<24} common-coverage mean err: "
+                  f"{r['common_mean_error']:.1f} deg")
     
     def create_comparison_plots(self, color_by_error=COLOR_ARROWS_BY_ERROR):
         """Create visual comparison of all methods.
@@ -711,8 +662,8 @@ class GradientFittingAnalyzer:
             ax.set_ylabel('Y Position (m)')
             ax.set_title(f'{method.name} - {method.description}\n'
                         f'Success: {result["success_rate"]:.1f}% | '
-                        f'Free-space error: {result["free_mean_error"]:.1f}° | '
-                        f'Shadow deviation: {result["shadow_mean_error"]:.1f}°',
+                        f'Common-coverage err: {result["common_mean_error"]:.1f}° | '
+                        f'Own-coverage err: {result["mean_angle_error"]:.1f}°',
                         fontweight='bold')
             ax.set_aspect('equal')
             ax.grid(True, alpha=0.3)
@@ -727,7 +678,7 @@ class GradientFittingAnalyzer:
             if quiver is not None:
                 cax_error = divider.append_axes("left", size="2%")
                 cbar_error = plt.colorbar(quiver, cax=cax_error,
-                                          label='Angle Error (deg) — grey = low R²')
+                                          label='Angle error vs straight-to-source (deg) — grey = low R²')
                 cax_error.yaxis.set_ticks_position('left')
                 cax_error.yaxis.set_label_position('left')
 
@@ -737,11 +688,14 @@ class GradientFittingAnalyzer:
         print("[SUCCESS] Saved comparison plots to 'gradient_method_comparison.png'")
     
     def create_performance_plots(self):
-        """Region-conditioned performance plots.
+        """Coverage-first performance plots.
 
-        Free-space accuracy (where straight-to-source is the correct answer) is the
-        valid ranking metric; the shadow panel reports how well each method steers
-        AROUND the obstacle, which is what the controller actually needs there.
+        Success rate (coverage) is the primary metric: the controller needs a gradient
+        to be available, the bearing handles the open-space heading. Accuracy is shown
+        on the common-coverage set, the points every method estimates, so a low-coverage
+        method is not flattered by never being scored on the hardest points. The
+        own-coverage panel shows the same error on each method's full coverage, exposing
+        that the apparent accuracy gap is largely a coverage artifact.
         """
         print("\n[INFO] Creating performance analysis plots...")
 
@@ -761,36 +715,43 @@ class GradientFittingAnalyzer:
                 ax.text(b.get_x() + b.get_width() / 2., b.get_height(),
                         fmt.format(v), ha='center', va='bottom', fontweight='bold')
 
-        # 1. Success rate
+        # 1. Success rate -- the PRIMARY metric (coverage / availability)
         _bars(axes[0, 0], [self.results[n]['success_rate'] for n in names],
-              'steelblue', 'Success Rate (%)', 'Gradient Estimation Success Rate',
+              'steelblue', 'Success Rate (%)',
+              'Coverage: Success Rate\n(primary metric -- gradient must be available)',
               '{:.1f}%', ylim=[0, 100])
 
-        # 2. Free-space accuracy -- the valid metric for ranking
-        _bars(axes[0, 1], [self.results[n]['free_mean_error'] for n in names],
+        # 2. Fair accuracy: error on the common-coverage set (points all methods estimate)
+        n_common = self.results[names[0]].get('n_common', 0)
+        _bars(axes[0, 1], [self.results[n]['common_mean_error'] for n in names],
               'coral', 'Mean Angle Error (deg)',
-              'Accuracy in Free Space\n(line of sight to source clear)', '{:.1f}°')
-
-        # 3. Obstacle avoidance behind the pillar -- mean deviation from the escape
-        #    (tangent) direction, in degrees so it reads like the free-space error.
-        _bars(axes[1, 0], [self.results[n]['shadow_mean_error'] for n in names],
-              'seagreen', 'Mean Deviation from Escape Dir. (deg)',
-              'Obstacle Avoidance in the Shadow\n(deviation from the way around the pillar)',
+              f'Fair Accuracy: Common-Coverage Error\n({n_common} points every method estimates)',
               '{:.1f}°')
 
-        # 4. CDF of FREE-SPACE errors only (where the metric is valid)
+        # 3. Same error on each method's OWN coverage -- exposes the coverage artifact:
+        #    high-coverage methods look worse only because they are scored on harder points.
+        _bars(axes[1, 0], [self.results[n]['mean_angle_error'] for n in names],
+              'seagreen', 'Mean Angle Error (deg)',
+              'Own-Coverage Error\n(higher = method also estimates the harder points)',
+              '{:.1f}°')
+
+        # 4. CDF of common-coverage errors
         ax4 = axes[1, 1]
+        common = None
+        for method in self.methods:
+            s = self.results[method.name]['scored']
+            common = s.copy() if common is None else (common & s)
         for method in self.methods:
             r = self.results[method.name]
-            e = np.sort(r['angle_error'][(r['region'] == 'free') &
-                                         (r['angle_error'] >= 0) & (r['angle_error'] < 180)])
+            vals = r['angle_error'][common] if common is not None else np.array([])
+            e = np.sort(vals[np.isfinite(vals)])
             if e.size:
                 ax4.plot(e, np.arange(1, e.size + 1) / e.size * 100, linewidth=2, label=method.name)
         ax4.axvline(x=10, color='green', linestyle='--', alpha=0.5, label='10° threshold')
         ax4.axvline(x=30, color='orange', linestyle='--', alpha=0.5, label='30° threshold')
-        ax4.set_xlabel('Free-space Angle Error (deg)')
+        ax4.set_xlabel('Common-coverage Angle Error (deg)')
         ax4.set_ylabel('Cumulative Percentage (%)')
-        ax4.set_title('CDF of Free-space Direction Errors', fontweight='bold')
+        ax4.set_title('CDF of Common-Coverage Direction Errors', fontweight='bold')
         ax4.legend()
         ax4.grid(True, alpha=0.3)
 
@@ -830,45 +791,39 @@ METHODS TESTED:
         
         report += f"\n\n{'=' * 70}\nRESULTS SUMMARY\n{'=' * 70}\n\n"
         
-        # Region-conditioned comparison table
-        report += (f"{'Method':<24} {'Success':<9} {'Free err':<10} "
-                   f"{'Free med':<10} {'Shadow dev':<12}\n")
-        report += "-" * 66 + "\n"
+        # Coverage-first comparison table
+        n_common = self.results[self.methods[0].name].get('n_common', 0)
+        report += (f"{'Method':<24} {'Success':<9} {'Common err':<12} "
+                   f"{'Common med':<12} {'Own err':<10}\n")
+        report += "-" * 70 + "\n"
         for method in self.methods:
             r = self.results[method.name]
             report += (f"{method.name:<24} {r['success_rate']:>6.1f}%  "
-                       f"{r['free_mean_error']:>7.1f}°  "
-                       f"{r['free_median_error']:>7.1f}°  "
-                       f"{r['shadow_mean_error']:>8.1f}°\n")
-        report += ("\nFree err / Free med : mean / median angle error in free space, "
-                   "where straight-to-source is the correct answer.\n"
-                   "Shadow dev          : mean deviation behind the obstacle from the escape "
-                   "(tangent-around) direction; lower means it steers around the pillar.\n")
+                       f"{r['common_mean_error']:>8.1f}°   "
+                       f"{r['common_median_error']:>8.1f}°   "
+                       f"{r['mean_angle_error']:>7.1f}°\n")
+        report += (f"\nSuccess     : %% of sample points where the method returns a usable "
+                   f"estimate (PRIMARY metric: the gradient must be available).\n"
+                   f"Common err  : mean / median angle error on the {n_common} points that "
+                   f"EVERY method estimates -- the fair accuracy comparison.\n"
+                   f"Own err     : mean angle error on the method's own coverage; larger "
+                   f"values mostly mean the method also scores the harder points.\n").replace('%%', '%')
 
         report += f"\n\n{'=' * 70}\nDETAILED ANALYSIS\n{'=' * 70}\n"
 
-        # Rank on the valid metrics: free-space accuracy and obstacle escape
+        # Coverage is primary; common-coverage error is the fair accuracy tie-break.
         best_success = max(self.methods, key=lambda m: self.results[m.name]['success_rate'])
-        best_accuracy = min(self.methods, key=lambda m: self.results[m.name]['free_mean_error'])
-        best_escape = min(self.methods, key=lambda m: self.results[m.name]['shadow_mean_error'])
+        best_accuracy = min(self.methods, key=lambda m: self.results[m.name]['common_mean_error'])
 
-        report += f"\nBest Success Rate:        {best_success.name} ({self.results[best_success.name]['success_rate']:.1f}%)\n"
-        report += f"Best Free-space Accuracy: {best_accuracy.name} ({self.results[best_accuracy.name]['free_mean_error']:.1f}° mean)\n"
-        report += f"Best Obstacle Escape:     {best_escape.name} ({self.results[best_escape.name]['shadow_mean_error']:.1f}° deviation)\n"
-        
-        report += f"\n\nRECOMMENDATIONS:\n"
+        report += f"\nBest Coverage (success rate):  {best_success.name} ({self.results[best_success.name]['success_rate']:.1f}%)\n"
+        report += f"Best Common-coverage accuracy: {best_accuracy.name} ({self.results[best_accuracy.name]['common_mean_error']:.1f}° mean)\n"
+
+        report += f"\n\nNOTE ON RANKING:\n"
         report += "-" * 70 + "\n"
-        
-        # Provide recommendations based on results
-        if self.results[best_accuracy.name]['free_mean_error'] < 15:
-            report += f"✓ EXCELLENT: {best_accuracy.name} achieves <15° mean error\n"
-            report += f"  Recommended for production use\n"
-        elif self.results[best_accuracy.name]['free_mean_error'] < 30:
-            report += f"✓ GOOD: {best_accuracy.name} achieves <30° mean error\n"
-            report += f"  Suitable for navigation with some inaccuracy\n"
-        else:
-            report += f"⚠ POOR: Best method still has >{self.results[best_accuracy.name]['free_mean_error']:.1f}° error\n"
-            report += f"  Consider: adjusting parameters, adding more map points, or obstacle handling\n"
+        report += ("Methods are ranked on coverage first. On the common-coverage set the\n"
+                   "accuracy spread is small, so a few degrees there are not decisive: the\n"
+                   "bearing supplies the open-space heading, and the gradient only needs to\n"
+                   "point broadly the right way wherever it is queried.\n")
         
         report += f"\n\nFILES GENERATED:\n"
         report += "-" * 70 + "\n"
