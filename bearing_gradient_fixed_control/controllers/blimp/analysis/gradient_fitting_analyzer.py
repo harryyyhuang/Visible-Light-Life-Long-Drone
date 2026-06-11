@@ -583,10 +583,10 @@ class GradientFittingAnalyzer:
         print("\n[INFO] Creating comparison plots...")
         
         n_methods = len(self.methods)
-        # Lay the per-method panels out in a grid rather than a tall single column,
-        # so the figure is landscape and fills the page width. 3 columns for 5-6
-        # methods gives a 2x3 grid (the unused cell, if any, is left blank).
-        n_cols = 2 if n_methods <= 4 else 3
+        # Lay the per-method panels out in two columns rather than a tall single
+        # column, so 5-6 methods become three rows of two (any unused cell is left
+        # blank). This keeps each panel large while fitting the page.
+        n_cols = 2
         n_rows = int(np.ceil(n_methods / n_cols))
         fig = plt.figure(figsize=(7.5 * n_cols, 6.8 * n_rows))
         
@@ -596,12 +596,12 @@ class GradientFittingAnalyzer:
             # Vector field plot
             ax = fig.add_subplot(n_rows, n_cols, idx + 1)
             
-            # Plot all map points colored by light intensity
-            scatter_bg = ax.scatter(self.map_df['x'], self.map_df['y'], 
-                                   c=self.map_df['total_light'], 
-                                   cmap='viridis', s=20, alpha=0.5, 
-                                   edgecolors='none', label='Map Points',
-                                   vmin=0, vmax=self.map_df['total_light'].max())
+            # Draw the light field as a filled, continuous background (a triangulated
+            # contour fill) instead of sparse dots, which leave white gaps that hide
+            # the field in the larger panels.
+            ax.tricontourf(self.map_df['x'], self.map_df['y'], self.map_df['total_light'],
+                           levels=20, cmap='viridis', alpha=0.7,
+                           vmin=0, vmax=self.map_df['total_light'].max())
             
             # Plot light source
             ax.scatter([LIGHT_SOURCE_X], [LIGHT_SOURCE_Y],
