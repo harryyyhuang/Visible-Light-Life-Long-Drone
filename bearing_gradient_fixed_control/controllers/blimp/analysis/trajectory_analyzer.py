@@ -28,6 +28,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.patches import Circle
 import os
 import sys
 
@@ -42,20 +43,74 @@ OUTPUT_DIR = os.path.join(SCRIPT_DIR, "plots")
 CANDIDATE_PATHS = [
     os.path.join(LOGS_DIR,   "fixed_fusion_trajectory.csv"),
     os.path.join(SCRIPT_DIR, "fixed_fusion_trajectory.csv"),
+    os.path.join(LOGS_DIR,   "history_gradient_trajectory.csv"),
+    os.path.join(SCRIPT_DIR, "history_gradient_trajectory.csv"),
     os.path.join(LOGS_DIR,   "trajectory_debug.csv"),
     os.path.join(SCRIPT_DIR, "trajectory_debug.csv"),
 ]
 
-COL_BEARING = "#F44336"
-COL_FUSED   = "#4CAF50"
-COL_SOURCE  = "#FFD700"
+COL_BEARING  = "#F44336"
+COL_FUSED    = "#4CAF50"
+COL_GRADIENT = "#2196F3"
+COL_SOURCE   = "#FFD700"
+
+# Colour for each controller phase. plot loops iterate over whatever phases
+# are actually present in the log, so adding a controller here is enough.
+PHASE_STYLES = {
+    "BEARING_ONLY": COL_BEARING,
+    "FUSED":        COL_FUSED,
+    "GRADIENT":     COL_GRADIENT,
+}
 
 TARGET_X = 5.1988
 TARGET_Y = 5.329
 
+# Static obstacle (pillar) -- offset just off the straight line from the blimp
+# start to the light target. Matches DEF PILLAR_CENTER in worlds/blimp.wbt.
+PILLAR_X = 1.0641218110900293
+PILLAR_Y = 1.6543637916575194
+PILLAR_R = 0.4
+
 # =============================================================================
 # DATA LOADING
 # =============================================================================
+
+def normalize_columns(df):
+    """
+    Map the basic gradient controller's log (history_gradient_trajectory.csv)
+    onto the canonical column names this script expects, so the SAME plots work
+    for both the fixed-fusion and the pure-gradient controllers without changing
+    either controller. Fixed-fusion logs already use the canonical names and
+    pass through untouched.
+
+    Gradient log -> canonical:
+        yaw (rad)            -> yaw_deg (deg)
+        setpoint_yaw (rad)   -> cmd_yaw_deg (deg)
+        setpoint_speed       -> forward_speed
+        light_intensity      -> total_light
+        gradient_angle       -> grad_angle
+        gradient_magnitude   -> grad_mag
+        distance_to_target   -> dist_to_target
+    """
+    if "yaw_deg" not in df.columns and "yaw" in df.columns:
+        df["yaw_deg"] = np.degrees(df["yaw"])
+    if "cmd_yaw_deg" not in df.columns and "setpoint_yaw" in df.columns:
+        df["cmd_yaw_deg"] = np.degrees(df["setpoint_yaw"])
+    if "forward_speed" not in df.columns and "setpoint_speed" in df.columns:
+        df["forward_speed"] = df["setpoint_speed"]
+
+    aliases = {
+        "light_intensity":    "total_light",
+        "gradient_angle":     "grad_angle",
+        "gradient_magnitude": "grad_mag",
+        "distance_to_target": "dist_to_target",
+    }
+    for src, dst in aliases.items():
+        if dst not in df.columns and src in df.columns:
+            df[dst] = df[src]
+
+    return df
+
 
 def load_trajectory_data(path=None):
     if path and os.path.exists(path):
@@ -85,6 +140,8 @@ def load_trajectory_data(path=None):
     print(f"Loaded {len(df)} data points from trajectory log")
     print(f"Data columns: {list(df.columns)}")
 
+    df = normalize_columns(df)
+
     required = ["time", "x", "y", "z", "yaw_deg", "cmd_yaw_deg", "forward_speed"]
     missing  = [c for c in required if c not in df.columns]
     if missing:
@@ -100,7 +157,8 @@ def load_trajectory_data(path=None):
         ever_fused = (df["grad_weight"] > 0).cummax()
         df["phase"] = ever_fused.map({True: "FUSED", False: "BEARING_ONLY"})
     else:
-        df["phase"] = "BEARING_ONLY"
+        # Pure-gradient controller log (no bearing/fusion columns).
+        df["phase"] = "GRADIENT"
 
     # Heading error wrapped to [-180, 180]
     df["heading_error"] = ((df["cmd_yaw_deg"] - df["yaw_deg"] + 180) % 360) - 180
@@ -151,7 +209,7 @@ def plot_3d_trajectory(df):
     fig = plt.figure(figsize=(14, 10))
     ax  = fig.add_subplot(111, projection="3d")
 
-    for phase, color in [("BEARING_ONLY", COL_BEARING), ("FUSED", COL_FUSED)]:
+    for phase, color in PHASE_STYLES.items():
         if (df["phase"] == phase).any():
             x, y, z = phase_xyz(df, phase)
             ax.plot(x, y, z, color=color, linewidth=2, alpha=0.85,
@@ -193,7 +251,14 @@ def plot_3d_trajectory(df):
 def plot_2d_trajectory(df):
     fig, ax = plt.subplots(figsize=(12, 10))
 
-    for phase, color in [("BEARING_ONLY", COL_BEARING), ("FUSED", COL_FUSED)]:
+    # Static obstacle (pillar) -- drawn first so the trajectory sits on top.
+    pillar = Circle((PILLAR_X, PILLAR_Y), PILLAR_R,
+                    facecolor="#8D6E63", edgecolor="black", linewidth=1.2,
+                    alpha=0.7, zorder=1, label="Obstacle (pillar)")
+    ax.add_patch(pillar)
+    ax.scatter(PILLAR_X, PILLAR_Y, color="black", s=15, zorder=2)
+
+    for phase, color in PHASE_STYLES.items():
         if (df["phase"] == phase).any():
             x, y = phase_xy(df, phase)
             ax.plot(x, y, color=color, linewidth=2.5, alpha=0.85,

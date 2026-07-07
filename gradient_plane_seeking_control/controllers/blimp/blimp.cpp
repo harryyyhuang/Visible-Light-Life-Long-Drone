@@ -487,16 +487,21 @@ int main() {
                 mode = "UNKNOWN";
             }
             
-            // For this gradient-based controller, we don't have explicit X,Y setpoints
-            // But we can log the current position and derived setpoints
-            double setpoint_x = est_x; // No explicit X setpoint in this controller
-            double setpoint_y = est_y; // No explicit Y setpoint in this controller
+            // The blimp navigates on a dead-reckoned estimate (est_x/est_y) that
+            // integrates commanded speed open-loop and never corrects from GPS,
+            // so it drifts from reality -- e.g. when stuck on an obstacle the
+            // estimate keeps advancing while the blimp is not moving. Log the
+            // ACTUAL GPS position as x,y so the trajectory reflects reality, and
+            // keep the believed (dead-reckoned) position as setpoint_x/setpoint_y
+            // so the two can be compared directly.
+            double setpoint_x = est_x; // dead-reckoned / believed X
+            double setpoint_y = est_y; // dead-reckoned / believed Y
             double setpoint_z = ALTITUDE_SETPOINT;
             double setpoint_yaw_rad = setpoint_yaw * M_PI / 180.0;
-            
+
             fprintf(trajectory_log, "%.3f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.3f,%.3f,%s,%.3f,%.1f,%.1f,%.4f\n",
                     current_time,
-                    est_x, est_y, position[2], // Current x,y,z
+                    position[0], position[1], position[2], // Actual GPS x,y,z
                     current_yaw_rad, // Current yaw in radians
                     setpoint_x, setpoint_y, setpoint_z, // Setpoint x,y,z
                     setpoint_yaw_rad, // Setpoint yaw in radians

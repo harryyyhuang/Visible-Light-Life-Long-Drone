@@ -73,6 +73,18 @@ static const double MIN_SENSOR_INTENSITY  = 0.1;   // per-sensor threshold
 static const double MIN_TOTAL_LIGHT       = 1.0;   // aggregate threshold
 
 // ---------------------------------------------------------------------------
+// Search behaviour -- used when the light is not visible (no valid bearing or
+// total light below threshold). With ~360 deg sensor coverage, rotating in
+// place gains nothing: the blimp must RELOCATE to recover the signal (e.g. move
+// out from behind an occluder). It therefore drives forward along a gentle arc
+// of radius SEARCH_RADIUS, sweeping new ground until light reappears -- the same
+// spiral-search idea used by the basic gradient controller's EXPLORING state.
+// The turn rate is derived from speed/radius so the two knobs stay intuitive.
+// ---------------------------------------------------------------------------
+static const double SEARCH_FORWARD_SPEED  = 0.15;  // m/s -- relocate while searching
+static const double SEARCH_RADIUS         = 1.0;   // m   -- arc radius of the scan
+
+// ---------------------------------------------------------------------------
 // Fusion weights (fixed)
 // ---------------------------------------------------------------------------
 static const double W_BEARING  = 0.5;
@@ -393,6 +405,9 @@ int main() {
     double smooth_bearing  = 0.0;   // low-pass filtered bearing (relative)
     bool   bearing_valid   = false;
 
+    double search_heading  = 0.0;   // commanded heading while scanning for light
+    bool   was_searching   = false; // edge-detect entry into the SEARCH state
+
     measurement_map.clear();
 
     // --- Wait for first valid step ---
@@ -517,16 +532,31 @@ int main() {
         double forward_speed = 0.0;
         double w_b = 1.0, w_g = 0.0;   // effective weights this step
 
+        // True when the light is not in view -- drives the SEARCH behaviour.
+        bool searching_now = search_active
+                             && (!bearing_valid || total_light <= MIN_TOTAL_LIGHT);
+
         if (!search_active) {
             // IDLE: hold heading
             cmd_yaw       = current_yaw;
             forward_speed = 0.0;
 
-        } else if (!bearing_valid || total_light <= MIN_TOTAL_LIGHT) {
-            // No light signal at all -- stop and wait
-            cmd_yaw       = current_yaw;
-            forward_speed = 0.0;
-            printf("[T:%.1fs] No light signal. Hovering.[bearing valid: %i] [total light: %0.0f]\n", t, bearing_valid, total_light);
+        } else if (searching_now) {
+            // SEARCH: no light in view -- drive forward along an arc to relocate
+            // and sweep new ground. On entry, start the arc from the current
+            // heading, then turn at speed/radius so the path curves at a fixed
+            // radius. Sensors are omnidirectional, so the forward motion (not the
+            // turning) is what recovers the signal.
+            double search_yaw_rate = (SEARCH_FORWARD_SPEED / SEARCH_RADIUS)
+                                     * (180.0 / M_PI);   // deg/s
+            if (!was_searching)
+                search_heading = current_yaw;
+            search_heading = normalize_angle(search_heading + search_yaw_rate * dt);
+            cmd_yaw       = search_heading;
+            forward_speed = SEARCH_FORWARD_SPEED;
+            w_b = 0.0; w_g = 0.0;
+            printf("[T:%.1fs] No light. SEARCHING (arc r=%.1fm @ %.1f m/s).[bearing valid: %i] [total light: %0.0f]\n",
+                   t, SEARCH_RADIUS, SEARCH_FORWARD_SPEED, bearing_valid, total_light);
 
         } else if (!grad_ready) {
             // Gradient not ready -- pure bearing (100% bearing weight)
@@ -542,6 +572,8 @@ int main() {
                                              grad_angle,      w_g);
             forward_speed = FORWARD_SPEED;
         }
+
+        was_searching = searching_now;   // remember for next-step edge detection
 
         // --- Emit to low-level controller ---
         if (gEmitter) {
@@ -579,7 +611,7 @@ int main() {
         static double last_print = 0.0;
         if (t - last_print >= 0.5) {
             const char* mode_str = !search_active          ? "IDLE        " :
-                                   (!bearing_valid)        ? "NO_SIGNAL   " :
+                                   searching_now           ? "SEARCHING   " :
                                    !grad_ready             ? "BEARING_ONLY" :
                                                              "FUSED       ";
             printf("[T:%5.1fs] %s | Light:%6.1f | Bearing:%6.1f° | "

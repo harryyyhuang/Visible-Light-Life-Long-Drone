@@ -57,8 +57,21 @@ PointLight {
 }
 
 
+# ===========================================================================
+# Single static obstacle placed just BESIDE the straight-line path between the
+# blimp start (-3.6117, -1.3011) and the light target (5.1988, 5.329).
+# Base line midpoint is (0.7935, 2.0139); the pillar is offset 0.45 m along the
+# perpendicular -n = (0.6013, -0.7990) -> centre (1.0641, 1.6544). With radius
+# 0.4 m this leaves a ~0.05 m gap between the pillar edge and the line of sight,
+# so the drone keeps a thin but continuous view of the light: the bearing stays
+# valid and total light never drops below MIN_TOTAL_LIGHT, so the SEARCHING
+# fallback is never triggered. Move the centre closer to the line to occlude
+# more (toward triggering SEARCH), or further to clear it.
+# No `physics` node -> the Solid is static (immovable): it provides a
+# collision boundingObject but will not be displaced when the blimp hits it.
+# ===========================================================================
 DEF PILLAR_CENTER Solid {
-  translation 0.8 1.5 1.5
+  translation 1.0641218110900293 1.6543637916575194 1.5
   children [
     Shape {
       appearance PBRAppearance {
@@ -76,9 +89,6 @@ DEF PILLAR_CENTER Solid {
   boundingObject Cylinder {
     radius 0.4
     height 3.0
-  }
-  physics Physics {
-    mass 1000
   }
 }
 
